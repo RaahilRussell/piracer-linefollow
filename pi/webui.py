@@ -182,7 +182,13 @@ class Hub:
         elif kid in ("speed_straight", "speed_transition", "speed_corner", "speed_ramp_down", "speed_ramp_up"):
             from donkey_part import SpeedPlan
             plan = self.pilot.speed_plan
-            st = x if kid == "speed_straight" else (plan.straight if plan else 0.0)
+            # Let either section speed slider be adjusted first. A corner value
+            # entered before a straight plan exists should still create a plan,
+            # using the current Full Auto ceiling for the straight target.
+            default_straight = (min(self.cap.mode_caps.get("local", self.cap.top), self.cap.top)
+                                if self.cap is not None else self.cfg.max_throttle)
+            st = x if kid == "speed_straight" else (plan.straight if plan else
+                 (default_straight if kid == "speed_corner" and x > 0 else 0.0))
             tr = x if kid == "speed_transition" else (plan.transition if plan else 0.0)
             co = x if kid == "speed_corner" else (plan.corner if plan else 0.0)
             down = x if kid == "speed_ramp_down" else (plan.ramp_down if plan else 1.0)

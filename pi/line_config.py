@@ -7,7 +7,7 @@ default from linetrack/config.py, which was tuned on real stage frames.
 """
 
 # --- What to follow ---------------------------------------------------------
-TARGET_X_RATIO = 0.20      # left orange line's inside edge sits at 20% of width (0.80 = other side)
+TARGET_X_RATIO = 0.40      # left orange line's inside edge sits left-of-center; 0.80 = other side
 LOOKAHEAD_RATIO = 0.62     # row (fraction of image height) where the error is measured
 
 # --- Orange detection -----------------------------------------------------------

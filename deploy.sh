@@ -7,7 +7,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PI_IP="${1:?Usage: ./deploy.sh <current-pi-ip>}"
-SSH=(ssh -i "$HOME/.ssh/id_piracer" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8 "pi@$PI_IP")
+# The Pi's DHCP address changes. Keep host verification tied to its previously
+# verified identity rather than treating each new address as a new machine.
+SSH=(ssh -i "$HOME/.ssh/id_piracer" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=8 -o HostKeyAlias=10.103.211.147 "pi@$PI_IP")
 
 echo "== checking the Pi at $PI_IP"
 "${SSH[@]}" 'echo "reachable, $(uptime -p)"'

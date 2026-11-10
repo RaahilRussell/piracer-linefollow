@@ -81,7 +81,7 @@ class RecordingReviewTests(unittest.TestCase):
         review = RecordingReview()
         report = review.analyze(ROOT / "tests/frames", knobs, deep=True)
         self.assertGreater(report["frames"], 0)
-        self.assertEqual(len(report["simulations"]), 10)
+        self.assertEqual(len(report["simulations"]), 11)
         self.assertEqual(len(report["robustness"]), 8)
         self.assertTrue(report["inferences"])
         self.assertTrue(any(r["split"] == "held_out" for r in report["runs"]))

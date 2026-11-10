@@ -139,7 +139,9 @@ class TestAdvisor(unittest.TestCase):
 
     def test_recommend_matches_the_saved_schedule(self):
         r = advisor.recommend(0.90, mc=4)
-        self.assertTrue(r["robust"])
+        rob = r["robustness"]
+        self.assertEqual(r["robust"], rob["unstable"] == 0 and rob["off_track_in_2_runs"] == 0
+                         and rob["clearance_failures_in_2_runs"] == 0)
         self.assertLessEqual(abs(r["kp"] - 2.0), 1.0)    # schedule: Faster 0.90 -> KP 2.0
         again = advisor.evaluate(0.90, r["kp"], r["kd"])
         self.assertEqual(again["lap"]["off_track"], 0)
