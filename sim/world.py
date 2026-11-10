@@ -25,6 +25,9 @@ class Metrics:
     seconds: float = 0.0
     lap_times: list = field(default_factory=list)
     off_track: int = 0
+    off_wide: int = 0                                     # ... of which over the RIGHT (outside) tape
+    off_inside: int = 0                                   # ... of which over the LEFT (inside) tape
+    inside_ticks: int = 0                                 # ticks with the body over the inside tape's outer edge
     off_track_t: list = field(default_factory=list)
     err_samples: list = field(default_factory=list)      # |offset - ride offset|, m
     min_clear_left: float = float("inf")                 # closest the car centre came to the left tape edge, m
@@ -43,7 +46,8 @@ class Metrics:
             "seconds": round(self.seconds, 1), "laps": len(self.lap_times),
             "lap_s": round(float(np.mean(laps)), 2) if laps else None,
             "best_lap_s": round(min(self.lap_times), 2) if self.lap_times else None,
-            "off_track": self.off_track,
+            "off_track": self.off_track, "off_wide": self.off_wide, "off_inside": self.off_inside,
+            "inside_pct": round(100 * self.inside_ticks / max(1, self.ticks), 1),
             "err_mean_cm": round(100 * float(np.mean(e)), 1), "err_p95_cm": round(100 * float(np.percentile(e, 95)), 1),
             "min_clear_left_cm": round(100 * self.min_clear_left, 1) if math.isfinite(self.min_clear_left) else None,
             "min_body_clear_left_cm": round(100 * self.min_body_clear_left, 1) if math.isfinite(self.min_body_clear_left) else None,
@@ -55,14 +59,34 @@ class Metrics:
         }
 
 
+def make_track(prof):
+    """The traced track polyline when the profile names one (sim/tracks/*.csv, columns x_m,y_m of the
+    LEFT/inner line in driving order), otherwise the stadium from the profile's straight/radius."""
+    entry = getattr(prof, "_e", {}).get("track_polyline")
+    path = entry.get("value") if isinstance(entry, dict) else None
+    if path:
+        import csv
+        import os
+        full = path if os.path.isabs(path) else os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+        with open(full) as f:
+            pts = [(float(r["x_m"]), float(r["y_m"])) for r in csv.DictReader(f)]
+        return Track.from_points(pts, prof)
+    return Track.stadium(prof)
+
+
 class World:
     def __init__(self, prof: Profile | None = None, ext: Extensions | None = None, vision="geometric",
-                 seed=0, target_ratio=None, row_ratio=None, camera_fps=None, processing_s=None):
+                 seed=0, target_ratio=None, row_ratio=None, camera_fps=None, processing_s=None,
+                 inside_tolerance_m=0.0):
         self.p = prof or Profile.load()
         self.ext = ext or Extensions()
         self.vision = vision
+        # How far the body may go over the INSIDE (left) tape's outer edge before it counts as off
+        # track. 0 = any crossing (strict). The race only punishes leaving the track, and riding
+        # over the inside line is accepted, so the race tools pass a tolerance here.
+        self.inside_tolerance_m = float(inside_tolerance_m)
         self.rng = np.random.default_rng(seed)
-        self.track = Track.stadium(self.p)
+        self.track = make_track(self.p)
         self.cam = Camera(self.p)
         self.veh = Vehicle(self.p, self.ext)
         self.camera_fps = camera_fps or self.p.camera_fps
@@ -73,6 +97,7 @@ class World:
         self._lane_ratio = 0.47
         self.want_edges = True        # measure edge pixels on several rows (corner geometry); costs ~12 row lookups
         self.edges = None
+        self.edges_source = "left"    # which line self.edges belongs to
         self._edges_next = None
         self.metrics = Metrics()
         self._detector = None
@@ -86,7 +111,10 @@ class World:
     def reset(self):
         off = self.ride_offset() if self.target_ratio is not None else 0.3
         self._ride = off
-        self.veh.reset(0.3, -(self.p.tape_width_m / 2 + off), 0.0)
+        # start 0.3 m along the left line, on the ride line, pointing along the track
+        i, _ = self.track.nearest(*(self.track.left[0] + 0.3 * self.track.tangent[0]))
+        x, y = self.track.left[i] + (self.p.tape_width_m / 2 + off) * self.track.normal_right[i]
+        self.veh.reset(float(x), float(y), float(math.atan2(self.track.tangent[i][1], self.track.tangent[i][0])))
         self.t = 0.0
         self._next_capture = 0.0
         self._frame = None            # (capture_time, measurement or image)
@@ -128,6 +156,7 @@ class World:
         x, src, both, edges = data
         # the edge pixels of the same (delayed) frame, for corner geometry; source says which line
         self.edges = None if edges is None else (edges[0] if src == "left" else edges[1] if src == "right" else None)
+        self.edges_source = src if src in ("left", "right") else "left"
         return x, x is not None, both, age, motion, None
 
     # ------------------------------------------------------------ stepping
@@ -174,9 +203,15 @@ class World:
         elif self._lap_t0 is not None and self._progress >= self._lap_mark:
             m.lap_times.append(self.t - self._lap_t0)
             self._lap_t0, self._lap_mark = self.t, self._lap_mark + L
-        # Off track when any chassis corner crosses either tape's outer edge.
-        if body_clear_left < 0.0 or body_clear_right < 0.0:
+        # Off track when any chassis corner crosses either tape's outer edge (the inside one may be
+        # crossed by inside_tolerance_m).
+        m.inside_ticks += int(body_clear_left < 0.0)
+        if body_clear_left < -self.inside_tolerance_m or body_clear_right < 0.0:
             m.off_track += 1
+            if body_clear_right < 0.0:
+                m.off_wide += 1
+            else:
+                m.off_inside += 1
             m.off_track_t.append(round(self.t, 2))
             t = self.t
             self.reset()

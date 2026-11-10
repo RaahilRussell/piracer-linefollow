@@ -83,7 +83,10 @@ Film the front wheels from above at 240 fps while flicking the steering stick fr
    - Compare with `python3 -c "from sim.params import Profile; from sim.camera import Camera; c=Camera(Profile.load()); print([round(c.row_distance(r),2) for r in (0.45,0.5,0.55,0.62,0.7,0.8,0.9)])"`.
    - If they disagree after steps 1–3, the lens isn't the assumed model. Note it in `camera_fov_deg`'s source and tell whoever maintains `sim/camera.py`.
 
-Until this step is done, the tilt (8°) and lane width (0.53 m) in the profile are *derived* from what the real frames show (horizon at 0.42 of the height, lines 0.47 of the width apart). They're consistent with the frames but not measured.
+Until this step is done, height and tilt are **estimated** (Nov 10), not measured: **0.12 m** and **15°**.
+- Height: the Waveshare side photos, scaled by the 174.1 mm wheelbase, put the lens centre at 0.118 m. Separately, `tools/calibrate_camera.py` gives a 0.366 m lane at 0.17 m; the to-scale Waveshare mat has a 0.27 m lane on the straights, which scales the height to 0.124 m.
+- Tilt: `tools/calibrate_camera.py` fits 15.2° to the recorded frames. Only about 15° at 0.12 m reproduces the real line spacing (0.47 of the image width at the 0.62 row). The old 8° treated the wall base as the horizon; the wall base sits below it, so 8° is a lower bound.
+- If you change them, set `CAM_HEIGHT_M` / `CAM_PITCH_DEG` in `pi/line_config.py` (or the dashboard's camera sliders) **and** `sim/profile.json`. Getting the height too high or the tilt too low makes pure pursuit run wide.
 
 ## 8. Delays: `actuator_delay_s` (and check `processing_s`)
 - **processing_s** is already measured on the Pi (17 ms offline, 33–51 ms while driving). The dashboard's "Loop · detect" tile shows it live.

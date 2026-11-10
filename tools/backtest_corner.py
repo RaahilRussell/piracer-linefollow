@@ -23,6 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [os.path.join(ROOT, "pi"), ROOT]
 
 from sim.__main__ import run_one  # noqa: E402
+from sim.controllers import PD_STEERING  # noqa: E402
 from sim.params import Profile  # noqa: E402
 from sim.tune import monte_carlo_profiles  # noqa: E402
 
@@ -38,7 +39,7 @@ VARIANTS = {
 
 
 def run(prof, speed, ov, seconds, seed):
-    w, _ = run_one(prof, seconds=seconds, speed=speed, overrides=ov, seed=seed)
+    w, _ = run_one(prof, seconds=seconds, speed=speed, overrides={**PD_STEERING, **ov}, seed=seed)   # PD vs PD + feedforward
     return w.metrics.summary()
 
 

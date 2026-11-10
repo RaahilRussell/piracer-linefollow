@@ -85,7 +85,7 @@ class Session:
         w, s = self.world, self.settings
         self.clk.t = w.t
         x, found, both, age, motion, img = w.observe()
-        angle, thr, cmd = self.ctrl.step(x, found, both, age, motion, img, edges=w.edges)
+        angle, thr, cmd = self.ctrl.step(x, found, both, age, motion, img, edges=w.edges, source=w.edges_source)
         if s["mode"] == "manual":
             fresh = time.monotonic() - self.manual["t"] < 0.4
             angle, thr = (self.manual["steer"], self.manual["thr"]) if fresh else (0.0, 0.0)

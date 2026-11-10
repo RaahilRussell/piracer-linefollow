@@ -1140,8 +1140,8 @@ async function pollTuning() {
     if (j.profiles && JSON.stringify(j.profiles) !== JSON.stringify(speedProfiles)) { speedProfiles = j.profiles; renderTuneProfiles(); }
     renderProfiles(j.profiles, j.recomputing);
     const a = j.autotune; if (!a) return;
-    $('atState').textContent = a.state === 'running' ? `Running: ${a.strategy} (${a.phase})` : ({not_run:'Ready',passed:'Passed',insufficient:'Not enough data',retune:'Run again',failed:'Failed',stopped:'Stopped'}[a.result] || a.state);
-    $('atState').className = 'badge ' + (a.state === 'running' ? 'warn' : a.result === 'passed' ? 'ok' : 'plain');
+    $('atState').textContent = a.state === 'paused' ? 'Paused: put the car on the line, re-select Full Auto' : a.state === 'running' ? `Running: ${a.strategy} (${a.phase})` : ({not_run:'Ready',passed:'Passed',insufficient:'Not enough data',retune:'Run again',failed:'Failed',stopped:'Stopped'}[a.result] || a.state);
+    $('atState').className = 'badge ' + ((a.state === 'running' || a.state === 'paused') ? 'warn' : a.result === 'passed' ? 'ok' : 'plain');
     $('atMsg').textContent = a.message || '';
     $('atKeep').disabled = !(a.best && a.state !== 'running');
     $('atSave').disabled = !(a.verified && a.verified.length && a.state !== 'running');
@@ -1165,18 +1165,23 @@ function renderSectionTune(a) {
   const active = a.section;
   for (const name of ['Straight', 'Corner']) {
     const key = name.toLowerCase(), card = $('section' + name + 'Card'), badge = $('section' + name + 'State');
-    const isActive = (active === key || active === 'both') && a.state === 'running';
+    const isActive = (active === key || active === 'both') && (a.state === 'running' || a.state === 'paused');
+    const held = (a.frozen || {})[key], lim = (a.limits || {})[key];
     card.classList.toggle('active', isActive);
     const result = (a.section_results || {})[key] || 'pending';
     const labels = { passed: 'Passed tracking checks', failed: 'Failed', insufficient: 'Not enough data', retune: 'Run again', stopped: 'Stopped' };
     const done = a.state === 'done' && (active === key || active === 'both');
     const shown = done && a.result !== 'passed' ? a.result : result;
-    badge.textContent = isActive ? (result === 'passed' ? 'Passed · monitoring' : 'Collecting samples') : done ? (labels[shown] || 'Not verified') : 'Ready';
+    badge.textContent = isActive && held ? `Held at ${fmt(lim && lim.kept, 2)} · limit` : a.state === 'paused' && isActive ? 'Paused · put car back' : isActive ? (result === 'passed' ? 'Passed · monitoring' : 'Collecting samples') : done ? (labels[shown] || 'Not verified') + (held && lim ? ` · limit ${fmt(lim.kept, 2)}` : '') : 'Ready';
     badge.className = 'badge ' + (isActive ? 'warn' : done && shown === 'passed' ? 'ok' : 'plain');
   }
   $('sectionSave').disabled = !(a.state === 'done' && active && a.result === 'passed');
   const stepFail = $('sectionStepFail');
-  if (stepFail) stepFail.disabled = !(a.state === 'running' && a.strategy === 'sections');
+  const ramping = (a.state === 'running' || a.state === 'paused') && a.strategy === 'sections';
+  if (stepFail) stepFail.disabled = !ramping;
+  for (const [id, key] of [['sectionCurveFast', 'corner'], ['sectionStraightFast', 'straight']]) {
+    const b = $(id); if (b) b.disabled = !ramping || !!(a.frozen || {})[key];
+  }
   $('sectionTuneNote').textContent = a.section ? (a.message || `Selected section: ${a.section}`) : 'Place the car first, then tune one section at a time.';
 }
 const strat = () => document.querySelector('input[name=strat]:checked').value;
@@ -1420,7 +1425,7 @@ function organizeWorkbench() {
   };
   lapCard.querySelector('.lap-pid').append($('bk_kp').closest('.bigknob'), $('bk_kd').closest('.bigknob'));
   const sectionDetails = document.createElement('section'); sectionDetails.className = 'card both-tuner';
-  sectionDetails.innerHTML = '<div class="card-h"><div><h2>Tune straight + curve automatically</h2><p class="note">Learns separate steering gains and raises real throttle for faster laps.</p></div></div><ol class="tuner-steps"><li>Set <b>Straight throttle</b> and <b>Curve throttle</b> below. Raise curve throttle if it bogs down there.</li><li>Start in <b>Full Auto</b>, place the car on the track, then press <b>Tune both automatically</b> and confirm.</li><li>It checks both sections. When both pass, it raises each throttle target by the selected step and checks again, up to the Full Auto cap.</li><li>If a step is too slow (motor bogging) or too fast, press <b>Step failed · stop &amp; keep last good</b>. It stops and returns to the last passing throttle and gains. Then raise the relevant throttle if it was bogging, or lower it if it was too fast.</li></ol><p class="note tuner-warning">The car moves during this trial. Keep the track clear and STOP if its path looks unsafe. Near-limit steering is acceptable while it keeps the line tracked.</p>';
+  sectionDetails.innerHTML = '<div class="card-h"><div><h2>Tune straight + curve automatically</h2><p class="note">Learns separate steering gains and raises real throttle for faster laps.</p></div></div><ol class="tuner-steps"><li>Set <b>Straight throttle</b> and <b>Curve throttle</b> below. Raise curve throttle if it bogs down there.</li><li>Start in <b>Full Auto</b>, place the car on the track, then press <b>Tune both automatically</b> and confirm.</li><li>It checks both sections (curves are detected from the line\'s curvature). When both pass, straight throttle goes up by the step and curve throttle by <b>half</b> the step, then it checks again.</li><li>When one section hits its limit (line lost there, health check fails, or you press <b>Curve too fast</b> / <b>Straight too fast</b>), that section goes back to its last passing throttle and is <b>held</b>. The other keeps climbing until it also hits its limit or the Full Auto cap.</li><li>If the line is lost, the car stops with the next step staged. Put it back on the line and re-select <b>Full Auto</b> to continue.</li><li><b>Step failed · stop &amp; keep last good</b> ends the whole run at the last passing throttle and gains.</li></ol><p class="note tuner-warning">The car moves during this trial. Keep the track clear and STOP if its path looks unsafe. Near-limit steering is acceptable while it keeps the line tracked.</p>';
   sectionDetails.append($('atState'), sectionTune);
   const autoTuneDetails = document.createElement('details'); autoTuneDetails.className = 'more';
   autoTuneDetails.innerHTML = '<summary>Results and speed limits</summary>';
@@ -1489,6 +1494,17 @@ function organizeWorkbench() {
   stepFail.textContent = 'Step failed · stop & keep last good'; stepFail.disabled = true;
   stepFail.title = 'Stops Tune both and restores the last passing straight/curve throttle and gains.';
   $('sectionTuneNote').parentElement.insertBefore(stepFail, $('sectionBothStart'));
+  for (const [id, key, label] of [['sectionCurveFast', 'corner', 'Curve too fast · hold it'], ['sectionStraightFast', 'straight', 'Straight too fast · hold it']]) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.id = id; b.className = 'btn'; b.textContent = label; b.disabled = true;
+    b.title = `Puts the ${key === 'corner' ? 'curve' : 'straight'} back to its last passing throttle and holds it there; the other section keeps climbing.`;
+    stepFail.parentElement.insertBefore(b, stepFail);
+    b.onclick = async () => {
+      b.disabled = true;
+      try { await api('/api/autotune', {action:'sections_fail', strategy:key}); toast(`${key === 'corner' ? 'Curve' : 'Straight'} held at last passing throttle`); pollTuning(); }
+      catch (e) { toast(e.message); pollTuning(); }
+    };
+  }
   stepFail.onclick = async () => {
     stepFail.disabled = true;
     try { const r = await api('/api/autotune', {action:'sections_fail'}); toast(r.message || 'Stopped at the last passing throttle'); pollTuning(); }

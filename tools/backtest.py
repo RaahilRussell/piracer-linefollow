@@ -133,8 +133,7 @@ def build(variant: dict):
                                      transition=ex["SPEED_TRANSITION"] or None,
                                      ramp_down=ex["SPEED_RAMP_DOWN"], ramp_up=ex["SPEED_RAMP_UP"])
     det = LineDetectorPart(cfg, clock=clk, show_overlay=False, model=pilot.model)
-    det.pilot = pilot
-    pilot.bend_source = lambda: det.bend
+    det.attach(pilot)
     return cfg, clk, det, pilot
 
 

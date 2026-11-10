@@ -48,12 +48,20 @@ KNOBS = [
     ("corner_kd", "Section gains", "Corner KD", 0.0, 2.0, 0.05, "Damping used in curves. 0 = shared KD."),
     ("corner_blend_start", "Section gains", "Corner blend starts", 0.0, 3.0, 0.05, "Curvature where corner gains begin blending in."),
     ("corner_blend_full", "Section gains", "Corner blend completes", 0.05, 3.0, 0.05, "Curvature where corner gains are fully active."),
+    ("corner_exit_steer", "Section gains", "Curve exit hold", 0.0, 1.0, 0.05, "Stay in curve gains and curve speed until steering unwinds below this fraction of max. 0 = off."),
     ("target_x_ratio", "Steering", "Target position", 0.05, 0.95, 0.01, "Where the left line's inside edge should sit (fraction of image width)."),
     ("lookahead_ratio", "Steering", "Lookahead row", 0.45, 0.95, 0.01, "Image row where the error is measured. Lower = further ahead."),
     ("max_steering", "Steering", "Max steering", 0.2, 1.0, 0.05, "Steering is clipped to +/- this."),
     ("steering_smoothing", "Steering", "Smoothing", 0.0, 0.9, 0.05, "0 = raw, 0.9 = very smooth (slower to react)."),
     ("steering_rate_limit", "Steering", "Rate limit /s", 0.5, 10.0, 0.5, "Max change in steering per second."),
-    ("ff_gain", "Steering", "Corner feedforward", 0.0, 1.0, 0.05, "Steer by the corner's measured curvature (atan(wheelbase/R)) so PD only corrects what's left. 0 = off. Simulator: 0.6 halves crashes at top speed, 1.0 is too much until the steering angle is measured."),
+    ("ff_gain", "Steering", "Corner feedforward", 0.0, 1.0, 0.05, "PD steering only: steer by the corner's measured curvature (atan(wheelbase/R)) so PD only corrects what's left. 0 = off. In the simulator it runs wide at curve exits above 0.90 throttle."),
+    ("pure_pursuit", "Steering law", "Pure pursuit", 0, 1, 1, "On: aim at a point of the ride line a lookahead distance ahead. Off: PD on the lookahead row (+ feedforward). Simulator: pure pursuit is clean at higher speed. Not yet driven on the real car."),
+    ("pursuit_ld_m", "Steering law", "Pursuit lookahead (m)", 0.2, 1.2, 0.05, "Distance ahead of the rear axle that pure pursuit aims at, at standstill. Shorter = follows tighter but twitchier."),
+    ("pursuit_ld_gain_s", "Steering law", "Lookahead per m/s", 0.0, 0.6, 0.05, "Extra lookahead per m/s of modelled speed, so it looks further ahead when fast."),
+    ("pursuit_pd", "Steering law", "PD share with pursuit", 0.0, 1.0, 0.05, "Share of KP/KD added on top of pure pursuit as camera-error feedback. 0.15 = default mix; 0 = pursuit alone; 0.3+ ran wide at race speed in the simulator."),
+    ("steer_max_deg", "Steering law", "Full-lock wheel angle (deg)", 10.0, 30.0, 0.5, "Wheel angle at full steering. 18 is fitted to recorded runs, not measured. Used by pure pursuit and feedforward; the simulator uses the same value."),
+    ("cam_height_m", "Steering law", "Camera height (m)", 0.08, 0.22, 0.005, "Lens centre above the floor. 0.12 is ESTIMATED (Waveshare photos, mat lane width); measure it with a ruler and enter it. Pure pursuit aims through this: set too high and the car runs wide."),
+    ("cam_pitch_deg", "Steering law", "Camera tilt down (deg)", 0.0, 30.0, 0.5, "How far the camera's view points down from horizontal. 15 is ESTIMATED from recorded frames; measure with a phone level against the board. Set too low and pure pursuit runs wide."),
     ("speed_straight", "Full auto speed", "Straight speed (plan)", 0.0, 1.0, 0.01, "0 = off. Fast target on a settled straight. Bends and large corrections reduce it."),
     ("speed_transition", "Full auto speed", "Transition speed (plan)", 0.0, 1.0, 0.01, "Speed while a bend is building. 0 = midpoint of straight and corner speed."),
     ("speed_corner", "Full auto speed", "Corner speed (plan)", 0.0, 1.0, 0.01, "Lower target in a bend or large recovery. Never above straight speed. Keep high enough to roll."),
@@ -65,6 +73,25 @@ KNOBS = [
     ("throttle", "Full auto speed", "Fixed pilot throttle", 0.0, 1.0, 0.01, "Pilot throttle in local mode when auto-crawl is off."),
     ("corner_plan", "Full auto speed", "Corner speed planning", 0, 1, 1, "On: cap speed so the car can brake to the corner's grip limit (sqrt(grip*g*R)) in time. Needs measured grip; adds little in the simulator so far."),
     ("corner_margin", "Full auto speed", "Corner speed margin", 0.5, 1.0, 0.05, "Fraction of the grip-limited corner speed to allow."),
+    ("lap_sections", "Lap timer", "Straight/curve changes per lap", 2, 16, 1, "4 for an oval (straight, curve, straight, curve). Count yours once and set it here."),
+    ("race_laps", "Lap timer", "Laps in a race", 1, 30, 1, "The race total adds up this many of the latest laps (competition: 10)."),
+    ("lap_debounce_s", "Lap timer", "Section must hold (s)", 0.0, 1.0, 0.05, "A straight/curve change only counts once the new section has held this long, so a brief flicker is not a change."),
+    ("lap_min_s", "Lap timer", "Shortest possible lap (s)", 0.5, 10.0, 0.1, "Changes that add up to a lap faster than this are treated as flicker and ignored."),
+    ("track_length_m", "Lap timer", "Track length (m)", 1.0, 30.0, 0.01, "Length of the inside line, for the lap-time estimate. 4.98 is traced from the Waveshare mat."),
+    ("track_curve_share", "Lap timer", "Share of the track that is curve", 0.0, 1.0, 0.01, "For the lap-time estimate. 0.71 is traced from the Waveshare mat."),
+    ("tune_race_first", "Lap tuner rules", "Start with the race values", 0, 1, 1, "On: Start puts the race values (the defaults in line_config.py) on the car and checks them before climbing. Off: it starts from whatever the sliders say."),
+    ("tune_step", "Lap tuner rules", "Faster each lap by", 0.01, 0.12, 0.01, "Straight throttle added after a clean lap."),
+    ("tune_curve_ratio", "Lap tuner rules", "Curve step share", 0.0, 1.0, 0.05, "Curve step = straight step x this. 0 = curves never speed up."),
+    ("tune_lost_grace_s", "Lap tuner rules", "Line failure after (s)", 0.0, 1.5, 0.05, "The line must be gone this long before it counts as a line failure."),
+    ("tune_min_tracked", "Lap tuner rules", "Min line tracked", 0.5, 1.0, 0.01, "A section fails if the line is tracked less than this share of the time."),
+    ("tune_curve_sat", "Lap tuner rules", "Curve: full lock allowed", 0.1, 1.0, 0.05, "Share of a curve the steering may sit at full lock and still pass. Full lock in curves is normal."),
+    ("tune_straight_sat", "Lap tuner rules", "Straight: full lock allowed", 0.05, 1.0, 0.05, "Share of a straight at full lock that means it is going too fast."),
+    ("tune_weave", "Lap tuner rules", "Weave limit (swings/s)", 0.3, 2.0, 0.05, "Faster weaving than this lowers KP."),
+    ("tune_evidence", "Lap tuner rules", "Samples to pass a section", 10, 120, 1, "How much driving each section needs before it can pass (20 samples = 1 s)."),
+    ("tune_kp_max", "Lap tuner rules", "Max KP the tuner may set", 1.0, 8.0, 0.1, "The tuner never raises KP above this. Above 3.5 caused curve crashes in testing."),
+    ("tune_confirm_laps", "Lap tuner rules", "Clean laps before faster", 1, 5, 1, "Clean laps in a row needed at a speed before the next step. More = fewer surprises on race day."),
+    ("tune_margin_steps", "Lap tuner rules", "Safety margin (steps)", 0, 3, 1, "When a section hits its limit, race it this many steps below its last clean speed."),
+    ("tune_max_retunes", "Lap tuner rules", "Gain fixes before a limit", 0, 6, 1, "How many KP/KD adjustments a section gets before its speed counts as the limit."),
     ("s_lo", "Detection", "Min saturation", 60, 200, 1, "Orange filter. Tape ~151, wood floor ~53 (up to 150)."),
     ("v_lo", "Detection", "Min brightness", 60, 230, 1, "Orange filter brightness floor."),
     ("min_confidence", "Detection", "Min confidence", 0.1, 0.9, 0.01, "Below this the line counts as lost."),
@@ -76,14 +103,43 @@ KNOBS = [
 ]
 KNOB_IDS = {k[0] for k in KNOBS}
 KNOB_LABELS = {k[0]: k[2] for k in KNOBS}
-INT_KNOBS = {"s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "corner_plan"}
+INT_KNOBS = {"s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "corner_plan", "pure_pursuit", "tune_race_first", "tune_evidence", "tune_max_retunes", "tune_confirm_laps", "tune_margin_steps", "lap_sections", "race_laps"}
+
+# What a preset sets: everything that decides how the car steers and how fast it goes. Presets are
+# built on the server from line_config.py (Hub.presets), so the page never hard-codes a tuning value.
+RACE_KEYS = ("speed_straight", "speed_corner", "speed_transition", "speed_ramp_down", "speed_ramp_up",
+             "kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd",
+             "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing", "steering_rate_limit",
+             "ff_gain", "pure_pursuit", "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "steer_max_deg",
+             "corner_blend_start", "corner_blend_full", "corner_exit_steer", "corner_plan",
+             "lost_hold_heading", "coast_s", "slow_s", "max_auto", "top_throttle")
+# Changes each preset makes to the race values.
+def race_speeds(ex) -> dict:
+    """The Race preset's speeds from line_config (RACE_SPEED_*); missing ones fall back to the start-up speeds."""
+    return {k: ex.get("RACE_" + k.upper()) for k in ("speed_straight", "speed_transition", "speed_corner")}
+
+
+def safe_speeds(ex) -> dict:
+    """The Safe race preset's speeds from line_config (SAFE_SPEED_*)."""
+    return {k: ex.get("SAFE_" + k.upper()) for k in ("speed_straight", "speed_transition", "speed_corner")}
+
+
+SLOW_LAP = {"speed_straight": 0.75, "speed_corner": 0.70, "speed_transition": 0.75}
+# PD + no feedforward: the steering that has driven the real car (Nov 9, at 0.70-0.75). With the Nov 10
+# camera estimate (0.12 m / 15 deg) 0.75 / 0.70 is the fastest speed that never ran wide in any simulated
+# variation (0.80 / 0.75 fails with delay; 0.90 / 0.85 fails almost everywhere). Target 0.40: PD cuts curves.
+PD_FALLBACK = {"pure_pursuit": 0, "ff_gain": 0.0, "target_x_ratio": 0.40, "steering_smoothing": 0.35,
+               "speed_straight": 0.75, "speed_corner": 0.70, "speed_transition": 0.75}
 
 
 class Hub:
     """Everything the car loop and the web pages share."""
 
     def __init__(self, cfg, pilot, det, crawl=None, cap=None, data_dir="data", tuning_path=None,
-                 clock=time.monotonic, log_dir=None):
+                 clock=time.monotonic, log_dir=None, track_length_m=4.98, track_curve_share=0.71, race_speeds=None, safe_speeds=None):
+        # Race preset speeds when they differ from the start-up speeds (line_config RACE_SPEED_*)
+        self.race_speeds = {k: float(v) for k, v in (race_speeds or {}).items() if v is not None}
+        self.safe_speeds = {k: float(v) for k, v in (safe_speeds or {}).items() if v is not None}
         self.cfg, self.pilot, self.det, self.crawl, self.cap = cfg, pilot, det, crawl, cap
         self.data_dir = data_dir
         self.tuning_path = tuning_path
@@ -106,6 +162,11 @@ class Hub:
         self.allow_poweroff = False      # only drive_line.py on the Pi turns this on
         self.recording_review = None
         self.autotuner = None            # AutoTuner (drive_line.py / sim set it)
+        from lap_tuning import LapTimer
+        self.laptimer = LapTimer()
+        # traced Waveshare mat (sim/tracks/waveshare_inner_line.csv); only used for the lap-time estimate
+        self.track_length_m, self.track_curve_share = float(track_length_m), float(track_curve_share)
+        self._ground = None
         self.profiles = self._load_profiles()   # speed profiles from the simulator (gain_schedule.json)
         self.health = None               # last live tuning-health result (dict)
         self._health_t = -1e9
@@ -129,12 +190,15 @@ class Hub:
             "kp": c.kp, "kd": c.kd, "target_x_ratio": c.target_x_ratio, "lookahead_ratio": c.lookahead_ratio,
             "straight_kp": c.straight_kp or c.kp, "straight_kd": c.straight_kd or c.kd,
             "corner_kp": c.corner_kp or c.kp, "corner_kd": c.corner_kd or c.kd,
-            "corner_blend_start": c.corner_blend_start, "corner_blend_full": c.corner_blend_full,
+            "corner_blend_start": c.corner_blend_start, "corner_blend_full": c.corner_blend_full, "corner_exit_steer": getattr(c, "corner_exit_steer", 0.0),
             "max_steering": c.max_steering, "steering_smoothing": c.steering_smoothing,
             "steering_rate_limit": c.steering_rate_limit, "throttle": c.throttle,
             "s_lo": c.s_lo, "v_lo": c.v_lo, "min_confidence": c.min_confidence,
             "lost_timeout_s": c.lost_timeout_s,
             "ff_gain": c.ff_gain, "corner_plan": int(bool(c.corner_plan)), "corner_margin": c.corner_margin,
+            "pure_pursuit": int(bool(c.pure_pursuit)), "pursuit_ld_m": c.pursuit_ld_m,
+            "pursuit_ld_gain_s": c.pursuit_ld_gain_s, "pursuit_pd": c.pursuit_pd, "steer_max_deg": c.steer_max_deg,
+            "cam_height_m": self._model().cam_height_m, "cam_pitch_deg": self._model().cam_pitch_deg,
             "single_line_stop_s": getattr(self.pilot, "single_line_stop_s", 0.0),
             "lost_hold_heading": int(bool(c.lost_hold_heading)),
             "coast_s": getattr(self.pilot, "coast_s", 0.0), "slow_s": getattr(self.pilot, "slow_s", 0.0),
@@ -146,6 +210,17 @@ class Hub:
             "speed_ramp_down": self.pilot.speed_plan.ramp_down if getattr(self.pilot, "speed_plan", None) else 1.0,
             "speed_ramp_up": self.pilot.speed_plan.ramp_up if getattr(self.pilot, "speed_plan", None) else 0.4,
         }
+        v.update(lap_sections=self.laptimer.sections_per_lap, race_laps=self.laptimer.race_laps,
+                 lap_debounce_s=self.laptimer.debounce_s, lap_min_s=self.laptimer.min_lap_s,
+                 track_length_m=self.track_length_m, track_curve_share=self.track_curve_share)
+        at = self.autotuner
+        if at is not None:
+            v.update(tune_race_first=int(bool(at.race_first)))
+            v.update(tune_step=getattr(at, "step", 0.04), tune_curve_ratio=at.curve_step_ratio,
+                     tune_lost_grace_s=at.lost_grace_s, tune_min_tracked=at.min_tracked,
+                     tune_curve_sat=at.curve_sat, tune_straight_sat=at.straight_sat, tune_weave=at.weave_fast,
+                     tune_evidence=at.evidence, tune_max_retunes=at.max_retunes,
+                     tune_confirm_laps=at.confirm_laps, tune_margin_steps=at.margin_steps, tune_kp_max=at.kp_max)
         if self.cap is not None:
             v.update(max_user=self.cap.mode_caps.get("user", self.cap.top),
                      max_pilot_steers=self.cap.mode_caps.get("local_angle", self.cap.top),
@@ -153,6 +228,26 @@ class Hub:
         if cr is not None:
             v.update(crawl_start=cr.start, crawl_ramp=cr.ramp_up)
         return v
+
+    def _model(self):
+        """The camera/car model the pilot and detector project through (shared object on the car)."""
+        from linetrack.geometry import CarModel
+        return getattr(self.pilot, "model", None) or getattr(self.det, "model", None) or CarModel()
+
+    def set_camera(self, **values):
+        """Change the camera mount (height/tilt) live. The ground projection is rebuilt here and swapped
+        in whole, so the car loop never sees a half-built or missing model."""
+        from linetrack.geometry import GroundModel
+        models = {id(m): m for m in (getattr(self.pilot, "model", None), getattr(self.det, "model", None)) if m is not None}
+        for m in models.values():
+            for k, v in values.items():
+                setattr(m, k, float(v))
+        for m in models.values():
+            g = GroundModel(m)
+            for part in (self.pilot, self.det):
+                if part is not None and getattr(part, "model", None) is m:
+                    part.ground = g
+        self._ground = None
 
     def set_knob(self, kid: str, value) -> float:
         if kid not in KNOB_IDS:
@@ -165,16 +260,19 @@ class Hub:
         if kid in INT_KNOBS:
             x = int(round(x))
         c = self.cfg
-        if kid in ("kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd", "corner_blend_start", "corner_blend_full",
+        if kid in ("kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd", "corner_blend_start", "corner_blend_full", "corner_exit_steer",
                    "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing",
-                   "steering_rate_limit", "s_lo", "v_lo", "min_confidence", "lost_timeout_s", "ff_gain", "corner_margin"):
+                   "steering_rate_limit", "s_lo", "v_lo", "min_confidence", "lost_timeout_s", "ff_gain", "corner_margin",
+                   "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "steer_max_deg"):
             setattr(c, kid, x)
+        elif kid in ("cam_height_m", "cam_pitch_deg"):
+            self.set_camera(**{kid: x})
         elif kid == "throttle":
             c.throttle = min(x, c.max_throttle)
             x = c.throttle
         elif kid == "single_line_stop_s":
             self.pilot.single_line_stop_s = x
-        elif kid in ("lost_hold_heading", "corner_plan"):
+        elif kid in ("lost_hold_heading", "corner_plan", "pure_pursuit"):
             setattr(c, kid, bool(x))
         elif kid in ("coast_s", "slow_s"):
             setattr(self.pilot, kid, x)
@@ -198,6 +296,25 @@ class Hub:
                 attr = {"speed_straight": "straight", "speed_corner": "corner", "speed_transition": "transition",
                         "speed_ramp_down": "ramp_down", "speed_ramp_up": "ramp_up"}[kid]
                 x = getattr(self.pilot.speed_plan, attr)
+        elif kid in ("lap_sections", "race_laps"):
+            setattr(self.laptimer, "sections_per_lap" if kid == "lap_sections" else "race_laps", int(x))
+        elif kid in ("lap_debounce_s", "lap_min_s"):
+            setattr(self.laptimer, "debounce_s" if kid == "lap_debounce_s" else "min_lap_s", x)
+        elif kid in ("track_length_m", "track_curve_share"):
+            setattr(self, kid, x)
+        elif kid.startswith("tune_"):
+            at = self.autotuner
+            if at is None:   # saved rules load before the tuner exists: apply them when it attaches
+                self._tune_pending = {**getattr(self, "_tune_pending", {}), kid: x}
+                return x
+            attr = {"tune_step": "step", "tune_curve_ratio": "curve_step_ratio", "tune_lost_grace_s": "lost_grace_s",
+                    "tune_min_tracked": "min_tracked", "tune_curve_sat": "curve_sat", "tune_straight_sat": "straight_sat",
+                    "tune_weave": "weave_fast", "tune_evidence": "evidence", "tune_max_retunes": "max_retunes",
+                    "tune_confirm_laps": "confirm_laps", "tune_margin_steps": "margin_steps", "tune_kp_max": "kp_max",
+                    "tune_race_first": "race_first"}[kid]
+            setattr(at, attr, bool(x) if kid == "tune_race_first" else x)
+            if kid in ("tune_step", "tune_curve_ratio") and at.state in ("running", "paused") and at.strategy == "sections":
+                at._set_steps()
         elif kid == "top_throttle":
             if self.cap is not None:
                 self.cap.top = x
@@ -216,6 +333,85 @@ class Hub:
                 self.crawl.ramp_up = x
         return x
 
+    def attach_autotuner(self, at):
+        """Install the lap tuner, apply any saved tuner rules, and record its defaults."""
+        self.autotuner = at
+        at.lap_source = lambda: self.laptimer.status(self.clock())
+        # defaults first (what "Reset to defaults" returns to), THEN the saved rules on top
+        self.defaults.update({k: v for k, v in self.knob_values().items() if k.startswith("tune_")})
+        for k, v in getattr(self, "_tune_pending", {}).items():
+            self.set_knob(k, v)
+        self._tune_pending = {}
+
+    # ------------------------------------------------------------ presets + lap-time estimate
+    def presets(self) -> list:
+        """One-tap setups for the page, built from line_config.py (the defaults this program started
+        with), so the page holds no tuning numbers of its own."""
+        race = {k: self.defaults[k] for k in RACE_KEYS if k in self.defaults}
+        race.update(self.race_speeds)
+        law = "pure pursuit" if race.get("pure_pursuit") else "PD steering"
+        out = []
+        for pid, label, change, text in (
+                ("race", "Race", {}, f"The race values from line_config.py: straight {race.get('speed_straight', 0):.2f}, curve "
+                 f"{race.get('speed_corner', 0):.2f}, {law}, target {race.get('target_x_ratio', 0):.2f}. About 3.5 s a lap in the simulator; never ran "
+                 "wide with any ONE assumed value wrong, but can with two wrong at once. Not yet driven at this speed on the real car."),
+                ("safe", "Safe race", self.safe_speeds, f"Race steering at straight {self.safe_speeds.get('speed_straight', 0):.2f} / curve "
+                 f"{self.safe_speeds.get('speed_corner', 0):.2f}: about 4.1 s a lap, and never ran wide in the simulator even with two "
+                 "assumed values wrong at once. Use it if Race runs wide."),
+                ("slow", "First slow lap", SLOW_LAP, "The race steering at 0.75 / 0.70 throttle (the speed the car has already "
+                 "driven, and what the lap tuner climbs from). Use it for the first lap of the day, then press Race."),
+                ("pd", "PD fallback", PD_FALLBACK, "Switches pure pursuit off: PD steering as driven on the real car on Nov 9, "
+                 "target 0.40, straight 0.75 / curve 0.70 (the fastest it was clean in the simulator). Use it if pure pursuit misbehaves.")):
+            if pid == "safe" and not change:
+                continue                                  # no SAFE_SPEED_* in line_config: no Safe race preset
+            vals = {**race, **change}
+            est = self.lap_estimate(vals)
+            out.append({"id": pid, "label": label, "help": text, "values": vals, "estimate": est})
+        return out
+
+    def apply_preset(self, pid):
+        pr = next((p for p in self.presets() if p["id"] == pid), None)
+        if pr is None:
+            raise ValueError(f"no preset '{pid}'")
+        out = self.apply(pr["values"], quiet=True)
+        self.log("info", f"Preset {pr['label']} applied: straight {out.get('speed_straight', 0):.2f}, curve "
+                         f"{out.get('speed_corner', 0):.2f} (Save on car to keep it)", "tune")
+        return out
+
+    def lap_estimate(self, values=None) -> dict | None:
+        """ESTIMATED lap and race time for these settings (default: what is on the car now), from the
+        traced track length and curve share and the assumed throttle-to-speed table."""
+        import lap_tuning
+        v = values or self.knob_values()
+        model = getattr(self.pilot, "model", None)
+        if model is None or not v.get("speed_straight"):
+            return None
+        try:
+            if self._ground is None:
+                from linetrack.geometry import GroundModel
+                self._ground = GroundModel(model)
+            side = self._ground.lateral_at(v.get("lookahead_ratio", self.cfg.lookahead_ratio),
+                                           v.get("target_x_ratio", self.cfg.target_x_ratio)) or 0.0
+        except Exception:
+            side = 0.0
+        # the traced line is the tape's centre; the car rides half a tape (2.5 cm) + its target offset outside it
+        lap = lap_tuning.estimate_lap(v["speed_straight"], v.get("speed_corner") or v["speed_straight"], model.speed_table,
+                                      self.track_length_m, self.track_curve_share, ride_offset_m=max(0.0, side) + 0.025,
+                                      pwm_stop=model.pwm_stop, pwm_full=model.pwm_full)
+        if lap is None:
+            return None
+        n = self.laptimer.race_laps
+        return {"lap_s": lap, "laps": n, "total_s": round(n * lap, 1), "straight": v["speed_straight"],
+                "corner": v.get("speed_corner") or v["speed_straight"], "estimate": True,
+                "basis": f"{self.track_length_m:.2f} m track, {100 * self.track_curve_share:.0f}% curve, assumed speed table; no penalties"}
+
+    def laps_status(self) -> dict:
+        """Lap timer + the estimate for the current settings (the page shows the estimate until real laps exist)."""
+        st = self.laptimer.status(self.clock())
+        with self.lock:
+            st["estimate"] = self.lap_estimate()
+        return st
+
     def _set_auto_max(self, x: float):
         """Full-auto max: caps the motor in local mode, the pilot's own limit and auto-crawl."""
         c = self.cfg
@@ -232,7 +428,7 @@ class Hub:
         out, changes = {}, []
         with self.lock:
             before = self.knob_values()
-            if any(k.startswith("speed_") for k in values) and self.autotuner is not None and self.autotuner.state == "running":
+            if any(k.startswith("speed_") for k in values) and self.autotuner is not None and self.autotuner.state in ("running", "paused"):
                 self.autotuner.abort("speed settings changed; restart trial to verify the new speeds")
             for k, v in values.items():
                 if k in KNOB_IDS:
@@ -240,6 +436,8 @@ class Hub:
                     old = before.get(k)
                     if old is not None and abs(float(old) - float(out[k])) > 1e-9:
                         changes.append(f"{KNOB_LABELS[k]} {old:g} -> {out[k]:g}")
+            if self.autotuner is not None and any(k in out for k in ("kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd")):
+                self.autotuner.adopt_user_gains()
             if any(k.startswith("speed_") for k in out):
                 current = self.knob_values()
                 out.update({k: current[k] for k in current if k.startswith("speed_")})
@@ -447,9 +645,21 @@ class Hub:
             lim = self.cap.limit("local") if self.cap is not None else 1.0
             at.ceiling = min(float(ceiling) if ceiling else lim, lim)
             at.schedule = self.schedule_points()
-            at.begin_sections(speed=None if speed in (None, "") else min(float(speed), at.ceiling), step=step)
+            race = None
+            if at.race_first:
+                # Race values first: put them on the car, then let the tuner check them before climbing.
+                pr = next(p for p in self.presets() if p["id"] == "race")
+                self.apply(pr["values"], quiet=True)
+                lim = self.cap.limit("local") if self.cap is not None else 1.0
+                at.ceiling = lim if not ceiling else min(float(ceiling), lim)
+                est = pr["estimate"] or {}
+                plan = self.pilot.speed_plan
+                race = {"straight": plan.straight, "corner": plan.corner, "lap_s": est.get("lap_s"),
+                        "total_s": est.get("total_s"), "laps": self.laptimer.race_laps}
+                self.laptimer.reset()
+            at.begin_sections(speed=None if speed in (None, "") else min(float(speed), at.ceiling), step=step, race=race)
         elif action == "sections_fail":
-            at.fail_sections()
+            at.fail_sections(strategy if strategy in ("straight", "corner") else None)
         elif action == "section_reset":
             at.reset_section(strategy)
         elif action == "section_finish":
@@ -967,6 +1177,12 @@ class TelemetryPart:
                 hub.autotuner.abort(f"error: {e}")
         if hub.autotuner is not None:
             tele["autotune"] = hub.autotuner.state
+        # Always told the mode: a lap must end when the pilot stops driving (Manual, STOP, tuner pause),
+        # or its clock would keep running until Full Auto comes back.
+        driving = cmd is not None and not pilot.motion_stopped
+        hub.laptimer.update(now, mode if driving else "user", tele.get("section"), cmd is not None and cmd.status == "TRACKING")
+        st = hub.laptimer.status(now)
+        tele["lap_current"], tele["lap_last"], tele["lap_best"], tele["lap_count"] = st["current"], st["last"], st["best"], st["count"]
         if mode == "local" and pilot.motion_stopped:
             tele["throttle"], tele["pwm"] = 0.0, 370.0
         try:
@@ -1016,7 +1232,11 @@ class Handler(BaseHTTPRequestHandler):
         p, q = u.path, parse_qs(u.query)
         hub = self.hub
         try:
-            if p in ("/", "/index.html"):
+            if p in ("/", "/index.html", "/tuner"):
+                tuner = os.path.join(os.path.dirname(os.path.abspath(self.page_path)), "laptuner.html")
+                with open(tuner if os.path.exists(tuner) else self.page_path, "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            if p == "/classic":
                 with open(self.page_path, "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             if p == "/api/state":
@@ -1024,7 +1244,9 @@ class Handler(BaseHTTPRequestHandler):
                     vals = hub.knob_values()
                 knobs = [dict(id=k[0], group=k[1], label=k[2], min=k[3], max=k[4], step=k[5], help=k[6],
                               value=vals.get(k[0]), default=hub.defaults.get(k[0])) for k in KNOBS]
-                return self._json({"knobs": knobs, "telemetry": hub.telemetry, "profiles": hub.profiles,
+                with hub.lock:
+                    presets = hub.presets()
+                return self._json({"knobs": knobs, "telemetry": hub.telemetry, "profiles": hub.profiles, "presets": presets,
                                    "saved": bool(hub.tuning_path and os.path.exists(hub.tuning_path)),
                                    "crawl_available": hub.crawl is not None})
             if p == "/api/runs":
@@ -1039,6 +1261,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"health": hub.health, "profiles": hub.profiles,
                                    "recomputing": getattr(hub, "_recomputing", False),
                                    "autotune": hub.autotuner.status() if hub.autotuner is not None else None})
+            if p == "/api/laps":
+                return self._json(hub.laps_status())
             if p == "/api/log":
                 return self._json(hub.events_since(int(q.get("since", ["0"])[0] or 0)))
             if p == "/api/log.txt":
@@ -1109,6 +1333,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if p == "/api/profile":
                 return self._json({"applied": hub.apply_profile(body.get("name"))})
+            if p == "/api/laps":
+                hub.laptimer.reset()
+                hub.log("info", "Lap timer reset", "action")
+                return self._json(hub.laps_status())
+            if p == "/api/preset":
+                return self._json({"applied": hub.apply_preset(body.get("name"))})
             if p == "/api/autotune":
                 return self._json(hub.autotune(body.get("action"), body.get("ceiling"), body.get("strategy"),
                                                body.get("speed"), body.get("step")))

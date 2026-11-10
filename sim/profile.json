@@ -138,7 +138,7 @@
     "value": [
       [
         300,
-        25.0
+        18.0
       ],
       [
         375,
@@ -146,16 +146,16 @@
       ],
       [
         450,
-        -25.0
+        -18.0
       ]
     ],
     "unit": "[PWM, front-wheel angle deg (+ = right)]",
     "range": [
-      15.0,
-      35.0
+      16.0,
+      20.0
     ],
-    "status": "assumed",
-    "source": "UNKNOWN. Placeholder linear map, +/-25 deg at the PWM limits, straight at 375 (Donkeycar's midpoint). Measure the turning radius at several PWM values: CALIBRATION.md step 2"
+    "status": "estimated",
+    "source": "FITTED to the real car (tools/calibrate_sim.py): of 12-25 deg, only 18 deg at full lock reproduces Nov 8-9 behaviour (0.70 / KP 3.5 holds the line with steering near the limit). Recorded commands never exceeded -0.74 (cap 0.8) and the line was lost 58% of frames at that cap. Measure: CALIBRATION.md step 2"
   },
   "servo_rate_dps": {
     "value": 300.0,
@@ -261,24 +261,24 @@
     "source": "UNKNOWN tyre-to-mat grip (max lateral accel / 9.81). CALIBRATION.md step 5"
   },
   "cam_height_m": {
-    "value": 0.17,
+    "value": 0.12,
     "unit": "m",
     "range": [
-      0.12,
-      0.22
+      0.11,
+      0.15
     ],
-    "status": "assumed",
-    "source": "UNKNOWN (must be under the 0.215 m body height). Measure: CALIBRATION.md step 7"
+    "status": "estimated",
+    "source": "ESTIMATED Nov 10 from two independent sources: (1) Waveshare side photos scaled by the 174.1 mm wheelbase put the lens centre at 0.118 m; (2) tools/calibrate_camera.py gives lane 0.366 m at 0.17 m, and the Waveshare mat diagram (to scale, 3.46 mm/px) has a 0.27 m lane on the straights -> 0.124 m. Measure with a ruler: CALIBRATION.md step 7"
   },
   "cam_pitch_deg": {
-    "value": 8.0,
+    "value": 15.0,
     "unit": "deg down",
     "range": [
-      4.0,
-      14.0
+      12.0,
+      18.0
     ],
-    "status": "assumed",
-    "source": "DERIVED, not measured: real frames show the horizon at ~0.42 of image height; under the 160-deg-diagonal equidistant fisheye model that means ~8 deg down. Measure directly: CALIBRATION.md step 7"
+    "status": "estimated",
+    "source": "ESTIMATED Nov 10: tools/calibrate_camera.py fit to real frames gives 15.2 deg; only ~15 deg at 0.12 m reproduces the real 0.47-of-width line spacing at the 0.62 row on the 0.30 m mat lane (0.17 m / 8 deg gives 0.25). The old 8 deg used the wall base as the horizon, which sits below it, so 8 is a lower bound; the stock Waveshare photo shows 22-28 deg (upper bound; this car's frames show a flatter mount). Measure with a phone inclinometer: CALIBRATION.md step 7"
   },
   "cam_fwd_m": {
     "value": 0.15,
@@ -311,34 +311,34 @@
     "source": "Frames with no usable line on a good track (rough, from runs)"
   },
   "track_straight_m": {
-    "value": 1.6,
+    "value": 0.66,
     "unit": "m",
     "range": [
-      0.8,
+      0.76,
       3.0
     ],
     "status": "assumed",
-    "source": "UNKNOWN: measure the stage track (CALIBRATION.md step 1)"
+    "source": "Traced Waveshare mat straights ~0.65-0.68 m (used only if track_polyline is removed)."
   },
   "track_radius_m": {
-    "value": 0.5,
+    "value": 0.56,
     "unit": "m (inside/left line)",
     "range": [
-      0.3,
-      1.0
+      0.55,
+      1.7
     ],
     "status": "assumed",
-    "source": "UNKNOWN: measure (step 1)"
+    "source": "Traced Waveshare mat median curve radius (used only if track_polyline is removed)."
   },
   "lane_width_m": {
-    "value": 0.53,
+    "value": 0.35,
     "unit": "m (left tape inside edge to right tape inside edge)",
     "range": [
-      0.4,
-      0.8
+      0.3,
+      0.39
     ],
-    "status": "assumed",
-    "source": "DERIVED, not measured: with the camera model above, 0.53 m reproduces the 0.47-of-width gap between the lines seen on real frames at the lookahead row. Measure with a tape measure: CALIBRATION.md step 1"
+    "status": "estimated",
+    "source": "Traced Waveshare mat: 0.30 m on straights, 0.39 m at the ends."
   },
   "tape_width_m": {
     "value": 0.05,
@@ -349,5 +349,10 @@
     ],
     "status": "assumed",
     "source": "UNKNOWN: measure the orange tape (step 1)"
+  },
+  "track_polyline": {
+    "value": "tracks/waveshare_inner_line.csv",
+    "status": "estimated",
+    "source": "Traced from the Waveshare PiRacer Pro 3x2 m mat image (ESE 1110 track): inner orange line, counter-clockwise, lap 4.98 m, 71% curve, curve radius ~0.56 m (0.46-0.76)."
   }
 }

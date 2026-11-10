@@ -51,9 +51,10 @@ class SteeringController:
     def update(self, x_ratio: float | None, found: bool, now: float, dt: float,
                frame_age: float, mode: str, ff: float = 0.0, target: float | None = None,
                gains: tuple[float, float] | None = None, corner_weight: float = 0.0,
-               section: str = "straight") -> Command:
+               section: str = "straight", ff_scale: float | None = None) -> Command:
         """ff: steering command that would follow the curve ahead exactly (from its curvature);
-        added as ff_gain * ff, so PD only has to correct what's left.
+        added as ff_gain * ff, so PD only has to correct what's left. ff_scale replaces ff_gain
+        when given (pure pursuit passes its whole steering command with ff_scale 1).
         target: where the edge should sit this frame (corner-aware); None = target_x_ratio."""
         c = self.cfg
         dt = clamp(dt, 1e-3, 0.5)
@@ -76,7 +77,7 @@ class SteeringController:
             self._prev_err = err
             kp, kd = gains if gains is not None else (c.kp, c.kd)
             p_term, d_term = kp * err, kd * self._d_filt
-            ff_term = c.ff_gain * ff
+            ff_term = (c.ff_gain if ff_scale is None else ff_scale) * ff
             if c.invert_steering:          # mirrored actuator: every steering command flips
                 p_term, d_term, ff_term = -p_term, -d_term, -ff_term
             raw = p_term + d_term + ff_term

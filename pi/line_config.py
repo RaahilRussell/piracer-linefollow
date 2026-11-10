@@ -7,7 +7,8 @@ default from linetrack/config.py, which was tuned on real stage frames.
 """
 
 # --- What to follow ---------------------------------------------------------
-TARGET_X_RATIO = 0.46
+TARGET_X_RATIO = 0.40      # Nov 10 re-fit (camera 0.12 m / 15 deg): 0.38-0.40 passes every simulated variation; 0.42+ runs wide with delay.
+                           # With PD steering (PURE_PURSUIT = False) use 0.40: PD cuts curves, and 0.46 put it on the left tape.
 # Camera orientation is already set by ~/mycar's CAMERA_HFLIP / CAMERA_VFLIP; do not flip frames again here.
 LOOKAHEAD_RATIO = 0.62     # row (fraction of image height) where the error is measured
 
@@ -19,13 +20,13 @@ S_LO = 110
 LOOKAHEAD_FROM_POINTS = True   # steer from where the edge really is at the lookahead row
 
 # --- Steering (angle -1 = left, +1 = right) ----------------------------------
-KP = 4.0
+KP = 3.5                   # known good on the car (Nov 9 morning); 4.0+ crashed in simulated curves
 KD = 0.4                   # was 0.25
-STRAIGHT_KP = 4.0
-CORNER_KP = 4.5
-MAX_STEERING = 1.0
-STEERING_RATE_LIMIT = 3.0  # max change per second
-STEERING_SMOOTHING = 0.35  # EMA, 0 = none
+STRAIGHT_KP = 3.5
+CORNER_KP = 3.5            # 4.5 caused curve off-tracks in the simulator; steering is at full lock in curves anyway
+MAX_STEERING = 1.0         # HARD STANDARD: full left lock (PWM 450, ~18 deg fitted to recorded runs). At 0.8 the car lost the line 58% of frames in tight curves.
+STEERING_RATE_LIMIT = 6.0  # max change per second. Nov 10: 3.0 lost the line up to 9% at 1.00/0.92; 5-10 hold it (6 = smallest clean step)
+STEERING_SMOOTHING = 0.20  # EMA, 0 = none. 0.35 (the PD setting) lagged pure pursuit at curve entry in the simulator
 INVERT_STEERING = False    # if the lifted-wheels test is mirrored, flip THIS (never the PWM calibration)
 
 # --- Corner geometry (linetrack/geometry.py; backtest: tools/backtest_corner.py) ------
@@ -41,16 +42,30 @@ INVERT_STEERING = False    # if the lifted-wheels test is mirrored, flip THIS (n
 # KEEP FF_GAIN = 0 ON THE CAR until a clean slow lap (recording on: log.csv now has curv / bend_near_m / ff)
 # shows straights near 0 and corners near 1 / (measured corner radius).
 FF_GAIN = 0.0
+# --- Steering law: pure pursuit (default) or PD + feedforward ----------------------------------------
+# Pure pursuit aims at the point of the ride line Ld ahead: wheel angle = atan(2 * wheelbase * sin(alpha) / Ld).
+# SIMULATOR ONLY, never driven on the real car. Nov 10 re-fit with the camera at 0.12 m / 15 deg: pure pursuit is
+# clean in all 21 race_eval variations up to 0.92 / 0.86 (4.1 s lap); PD is clean only up to 0.75 / 0.70 (6.9 s).
+# Check: python3 tools/race_eval.py --pairs. If it misbehaves on the car, press the dashboard's "PD fallback".
+PURE_PURSUIT = True
+PURSUIT_LD_M = 0.55        # lookahead distance at standstill, metres from the rear axle (Nov 10: 0.45-0.55 ok; 0.35 fails with delay)
+PURSUIT_LD_GAIN_S = 0.30   # extra lookahead per m/s (speed from SPEED_TABLE below, which is assumed). 0.2 fails with delay, 0.4 at pitch 18
+PURSUIT_PD = 0.10          # Nov 10: 0.10-0.15 ok, 0.05 and 0.25 fail. Share of KP/KD (3.5/0.4 -> 0.35/0.04) added on top of pure pursuit as image-space feedback.
+                           # Pure pursuit aims through the camera ground model (pitch/height/FOV assumed); this PD term
+                           # closes whatever offset a wrong model leaves.
+CORNER_EXIT_STEER = 0.0    # curve exit hold: no measurable effect in the simulator, so off
 CORNER_PLAN = False        # corner speed planning: adds little until grip is measured
 CORNER_MARGIN = 0.8
 CORNER_MIN_THROTTLE = 0.55
 CURVATURE_SMOOTHING = 0.5
 # Car model the geometry uses (sim/profile.json values; ASSUMED until measured: sim/CALIBRATION.md)
 WHEELBASE_M = 0.1741
-STEER_MAX_DEG = 25.0       # wheel angle at full steering command: MEASURE (most important)
+STEER_MAX_DEG = 18.0       # wheel angle at full steering command. FITTED to the recorded runs (tools/calibrate_sim.py),
+                           # same value as the simulator (sim/profile.json); a slider on the dashboard. Measure it to be sure.
 CAMERA_FOV_DEG = 160.0
-CAM_HEIGHT_M = 0.17
-CAM_PITCH_DEG = 8.0
+CAM_HEIGHT_M = 0.12        # ESTIMATED Nov 10 (Waveshare photos 0.118 m; mat lane width -> 0.124 m). Was 0.17. Measure with a ruler.
+CAM_PITCH_DEG = 15.0       # ESTIMATED Nov 10 (camera fit 15.2; line spacing in real frames). Was 8. If unsure, err high / err low on height:
+                           # that way pure pursuit cuts inside instead of running wide.
 CAM_FWD_M = 0.15
 GRIP_MU = 0.5
 BRAKE_DECEL = 1.5
@@ -82,8 +97,8 @@ MAX_EDGE_ROUGHNESS_PX = 2.5  # ragged-edged orange (wood grain, skin) is not tap
 # --- Lost-line behaviour ---------------------------------------------------------
 # Lost line: hold heading, keep rolling LOST_COAST_S, ramp down over LOST_SLOW_S, then stop.
 LOST_HOLD_HEADING = True
-LOST_COAST_S = 0.0
-LOST_SLOW_S = 0.0
+LOST_COAST_S = 0.5
+LOST_SLOW_S = 0.5
 
 # --- One line only = maybe the wrong line ----------------------------------------
 # With only one orange line identified, the pilot never speeds up; if that lasts
@@ -96,16 +111,33 @@ SINGLE_LINE_STOP_S = 2.5
 # Curvature drives the handoff: straight -> transition -> corner. The plan slews throttle
 # down/up so a bend is entered progressively and the car only accelerates after curvature clears.
 # The auto-tuner fills straight/corner; transition defaults to their midpoint.
-SPEED_STRAIGHT = 1.00   # faster starting throttle for the Lap Tuner
-SPEED_TRANSITION = 0.65
-SPEED_CORNER = 0.6
+# START-UP speeds: what the real car has driven (0.70-0.75 with KP 3.5, Nov 9). The lap tuner climbs from here.
+SPEED_STRAIGHT = 0.75
+SPEED_TRANSITION = 0.75
+SPEED_CORNER = 0.70
+# RACE VALUES (simulated only, Nov 10 re-fit with the camera at 0.12 m / 15 deg, steering rate 6):
+# 1.00 / 0.92 = 3.50 s lap and passes all 15 single-unknown race_eval variations (5 seeds x 40 s). It does NOT pass
+# two unknowns wrong at once (e.g. faster car + extra delay): if the car runs wide, press "Safe race".
+# The dashboard's "Race" preset. Every speed in the simulator rests on the assumed SPEED_TABLE, so trust the lap tuner.
+RACE_SPEED_STRAIGHT = 1.00
+RACE_SPEED_TRANSITION = 0.96
+RACE_SPEED_CORNER = 0.92
+# SAFE RACE: 0.92 / 0.86 = 4.1 s lap, the fastest pair that also passes every two-unknowns-wrong pair. The "Safe race" preset.
+SAFE_SPEED_STRAIGHT = 0.92
+SAFE_SPEED_TRANSITION = 0.89
+SAFE_SPEED_CORNER = 0.86
+TUNE_RACE_FIRST = False    # False: "Start lap tuner" climbs from the speeds on the car. True: jump to the race values first.
 SPEED_RAMP_DOWN = 2.0
 SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend
 
 # --- Auto-tuner (dashboard "Auto-tune": start slow, fix gains, step speed up) ------
-AUTOTUNE_START = 1.00      # faster initial Lap Tuner speed
-AUTOTUNE_STEP = 0.08       # speed added after each healthy window
+AUTOTUNE_START = 0.70      # used only by the classic strategies; the lap tuner starts from the speed plan above
+AUTOTUNE_STEP = 0.04       # straight step; curves climb half as fast
 AUTOTUNE_WINDOW_S = 10.0   # driving judged per step (about 1-2 laps)
+
+# --- Track (only for the dashboard's lap-time ESTIMATE; sliders under "Lap timer") --------------
+TRACK_LENGTH_M = 4.98      # inside line of the Waveshare mat, traced (sim/tracks/waveshare_inner_line.csv)
+TRACK_CURVE_SHARE = 0.71   # share of that length that is curve
 
 # --- Throttle (used in 'local' mode only if AUTO_CRAWL = False and the speed plan is off) ---
 LINE_THROTTLE = 0.35       # pilot crawl (~PWM 383). 0.20 (~377) did not move the car from a stop.

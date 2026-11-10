@@ -35,7 +35,8 @@ def rgb(path):
 class TestLoadConfig(unittest.TestCase):
     def test_defaults_from_line_config(self):
         cfg, extras = load_line_config(line_config)
-        self.assertAlmostEqual(cfg.target_x_ratio, 0.20)
+        self.assertAlmostEqual(cfg.target_x_ratio, line_config.TARGET_X_RATIO)
+        self.assertAlmostEqual(cfg.steer_max_deg, line_config.STEER_MAX_DEG)   # one full-lock angle: Config field and car model
         self.assertAlmostEqual(cfg.throttle, min(line_config.LINE_THROTTLE, line_config.MAX_THROTTLE))
         self.assertTrue(extras["SHOW_OVERLAY"])
 
@@ -233,8 +234,8 @@ class TestBacktestedFixes(unittest.TestCase):
         cfg.lost_hold_heading = True
         clock = Clock()
         p = LineFollowerPilot(cfg, clock=clock, crawl=AutoCrawl(), coast_s=0.5, slow_s=0.5)
-        for _ in range(20):                                   # tracking, line to the right -> steer right
-            clock.t += 0.05; angle, thr = p.run("local", 0.35, True, 0.0, 4.0, True)
+        for _ in range(20):                                   # tracking, line to the right of its target -> steer right
+            clock.t += 0.05; angle, thr = p.run("local", cfg.target_x_ratio + 0.15, True, 0.0, 4.0, True)
         self.assertGreater(thr, 0); self.assertGreater(angle, 0)
         held, seen = angle, []
         for _ in range(30):                                   # 1.5 s blind

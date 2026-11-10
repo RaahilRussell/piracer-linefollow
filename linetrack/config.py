@@ -80,8 +80,9 @@ class Config:
     straight_kd: float = 0.0
     corner_kp: float = 0.0
     corner_kd: float = 0.0
-    corner_blend_start: float = 0.25       # curvature (1/m) where corner gains begin blending in
-    corner_blend_full: float = 0.90        # curvature (1/m) where corner gains are fully active
+    corner_blend_start: float = 0.60       # curvature (1/m) where corner gains begin blending in (0.6/1.2: 30% straight / 70% curve on real frames, matching the traced Waveshare track)
+    corner_blend_full: float = 1.20        # curvature (1/m) where corner gains are fully active
+    corner_exit_steer: float = 0.0         # curve exit hold: stay in curve mode while |steering| is above this fraction of max; 0 = off
     max_steering: float = 0.8
     steering_rate_limit: float = 3.0   # max change in steering per second
     steering_smoothing: float = 0.35   # EMA factor on output (0 = none, 0.9 = very smooth)
@@ -92,6 +93,17 @@ class Config:
     corner_margin: float = 0.8         # fraction of the grip-limited corner speed to allow
     corner_min_throttle: float = 0.55  # never plan below this (the motor stalls lower)
     curvature_smoothing: float = 0.5   # EMA on the measured curvature (0 = raw)
+    # Wheel angle at steering command +/-1 (full lock). ONE value for the car and the simulator:
+    # sim/profile.json's steer_angle_table must agree (tests/test_geometry.py checks it).
+    # 18 deg is FITTED to the recorded runs (tools/calibrate_sim.py), not measured with a ruler.
+    steer_max_deg: float = 18.0
+    # --- Pure pursuit (alternative steering law; False = PD on the lookahead row + feedforward) ---
+    # Aim at the point of the ride line (tracked edge moved sideways by the target offset) that lies
+    # pursuit_ld_m + pursuit_ld_gain_s * speed ahead: wheel angle = atan(2 * wheelbase * sin(alpha) / Ld).
+    pure_pursuit: bool = False
+    pursuit_ld_m: float = 0.55         # lookahead distance Ld0, metres from the rear axle
+    pursuit_ld_gain_s: float = 0.0     # extra lookahead per m/s of (modelled) speed
+    pursuit_pd: float = 0.3            # share of KP/KD kept as a correction on top of pure pursuit
 
     # --- Safety / timing ---
     min_confidence: float = 0.35

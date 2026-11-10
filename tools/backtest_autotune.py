@@ -15,7 +15,7 @@ sys.path[:0] = [os.path.join(ROOT, "pi"), ROOT]
 
 from autotune import AutoTuner  # noqa: E402
 from sim.__main__ import _Clock, run_one  # noqa: E402
-from sim.controllers import PilotController  # noqa: E402
+from sim.controllers import PD_STEERING, PilotController  # noqa: E402
 from sim.params import Profile  # noqa: E402
 from sim.world import World  # noqa: E402
 
@@ -27,9 +27,10 @@ def load_schedule():
 
 
 def tune(prof, kp=None, kd=None, seed=0, max_s=900, ceiling=1.0, start=0.55, window_s=10.0, verbose=False,
-         strategy="ladder", hold_speed=None):
+         strategy="ladder", hold_speed=None, overrides=None):
     clk = _Clock()
-    ov = {k: v for k, v in (("kp", kp), ("kd", kd)) if v is not None}
+    # these strategies tune PD gains
+    ov = {**PD_STEERING, **(overrides or {}), **{k: v for k, v in (("kp", kp), ("kd", kd)) if v is not None}}
     ctrl = PilotController("autotune", ov, speed=start, clock=clk)
     ctrl.cap.mode_caps["local"] = max(ctrl.cap.mode_caps.get("local", 1.0), ceiling)
     ctrl.cap.top = max(ctrl.cap.top, ceiling)
@@ -42,7 +43,7 @@ def tune(prof, kp=None, kd=None, seed=0, max_s=900, ceiling=1.0, start=0.55, win
     while tuner.state == "running" and w.t < max_s:
         clk.t = w.t
         x, found, both, age, motion, img = w.observe()
-        angle, thr, cmd = ctrl.step(x, found, both, age, motion, img, edges=w.edges)
+        angle, thr, cmd = ctrl.step(x, found, both, age, motion, img, edges=w.edges, source=w.edges_source)
         tuner.update("local", cmd, cmd.status == "TRACKING")
         w.tick(angle, thr)
         if w.metrics.off_track > seen_off:
@@ -57,8 +58,9 @@ def tune(prof, kp=None, kd=None, seed=0, max_s=900, ceiling=1.0, start=0.55, win
     return tuner, w.metrics.off_track, w.t
 
 
-def drive(prof, kp, kd, straight, corner, seed=7, seconds=40):
-    w, _ = run_one(prof, seconds=seconds, speed=(straight, corner), overrides={"kp": kp, "kd": kd}, seed=seed)
+def drive(prof, kp, kd, straight, corner, seed=7, seconds=40, overrides=None):
+    w, _ = run_one(prof, seconds=seconds, speed=(straight, corner),
+                   overrides={**PD_STEERING, **(overrides or {}), "kp": kp, "kd": kd}, seed=seed)
     return w.metrics.summary()
 
 

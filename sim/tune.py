@@ -175,9 +175,10 @@ class LinearLoop:
 # ------------------------------------------------------------------ nonlinear scoring
 def nonlinear_score(prof, speed, kp, kd, seeds=(0, 1), seconds=30.0):
     from .__main__ import run_one
+    from .controllers import PD_STEERING
     tot, parts = 0.0, []
     for sd in seeds:
-        w, _ = run_one(prof, seconds=seconds, speed=speed, overrides={"kp": kp, "kd": kd}, seed=sd)
+        w, _ = run_one(prof, seconds=seconds, speed=speed, overrides={**PD_STEERING, "kp": kp, "kd": kd}, seed=sd)
         m = w.metrics.summary()
         steer = np.array([e for e in w.metrics.err_samples]) if False else None
         clearance = min(m.get("min_body_clear_left_cm") or 0.0, m.get("min_body_clear_right_cm") or 0.0)
@@ -193,11 +194,11 @@ def nonlinear_score(prof, speed, kp, kd, seeds=(0, 1), seconds=30.0):
 def step_response(prof, speed, kp, kd, offset_m=0.06, seconds=6.0):
     """Start 6 cm off the ride line on a long straight; measure overshoot and settling."""
     from .__main__ import _Clock
-    from .controllers import PilotController
+    from .controllers import PD_STEERING, PilotController
     from .world import World
     q = prof.with_values(track_straight_m=max(prof.track_straight_m, 12.0))
     clk = _Clock()
-    ctrl = PilotController("step", {"kp": kp, "kd": kd}, speed=speed, clock=clk)
+    ctrl = PilotController("step", {**PD_STEERING, "kp": kp, "kd": kd}, speed=speed, clock=clk)
     w = World(q, seed=5, target_ratio=ctrl.cfg.target_x_ratio, row_ratio=ctrl.cfg.lookahead_ratio)
     w.want_edges = ctrl.needs_edges
     s = w.veh.s
@@ -207,7 +208,7 @@ def step_response(prof, speed, kp, kd, offset_m=0.06, seconds=6.0):
     while w.t < seconds:
         clk.t = w.t
         x, found, both, age, motion, img = w.observe()
-        a, t_, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges)
+        a, t_, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges, source=w.edges_source)
         w.tick(a, t_)
         off = w.track.offset_from_left(s.x, s.y) - w._ride
         errs.append(off)
@@ -315,7 +316,8 @@ def schedule(prof=None, profiles=PROFILES, mc=10, verbose=True):
                 worst_pm = min(worst_pm, a.get("pm_deg") or 0)
             for q in draws[:4]:
                 from .__main__ import run_one
-                w, _ = run_one(q, seconds=20, speed=speed, overrides={"kp": kp, "kd": kd}, seed=3)
+                from .controllers import PD_STEERING
+                w, _ = run_one(q, seconds=20, speed=speed, overrides={**PD_STEERING, "kp": kp, "kd": kd}, seed=3)
                 off += w.metrics.off_track
                 m = w.metrics.summary()
                 clear = min(m.get("min_body_clear_left_cm") or 0.0, m.get("min_body_clear_right_cm") or 0.0)

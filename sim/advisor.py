@@ -35,7 +35,7 @@ from donkey_part import load_line_config  # noqa: E402
 
 from .actuators import ThrottleMap  # noqa: E402
 from .camera import Camera, target_offset  # noqa: E402
-from .controllers import PilotController  # noqa: E402
+from .controllers import PD_STEERING, PilotController  # noqa: E402
 from .feasibility import corner_report  # noqa: E402
 from .params import Profile  # noqa: E402
 from .track import Track  # noqa: E402
@@ -123,7 +123,7 @@ def speed_info(cmd: float, over=None) -> dict:
 def _drive(prof, speed, kp, kd, over, seconds, seed=3, offset_m=None, every=2):
     """Drive the simulated car; return (world, trace, path)."""
     clk = _Clock()
-    ov = {"kp": float(kp), "kd": float(kd)}
+    ov = {**PD_STEERING, "kp": float(kp), "kd": float(kd)}      # the advisor judges KP/KD: PD steering
     ov.update(_clean_over(over))
     ctrl = PilotController("dashboard", ov, speed=speed, clock=clk)
     w = World(prof, seed=seed, target_ratio=ctrl.cfg.target_x_ratio, row_ratio=ctrl.cfg.lookahead_ratio)
@@ -135,7 +135,7 @@ def _drive(prof, speed, kp, kd, over, seconds, seed=3, offset_m=None, every=2):
     while w.t < seconds:
         clk.t = w.t
         x, found, both, age, motion, img = w.observe()
-        a, th, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges)
+        a, th, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges, source=w.edges_source)
         w.tick(a, th)
         s = w.veh.s
         if i % every == 0:

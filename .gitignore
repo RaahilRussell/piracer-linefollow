@@ -22,3 +22,5 @@ pi/tuning.json
 pi/tuning_sim.json
 pi/gain_schedule_live.json
 tools/candidates/
+.pi_ip
+.pi_host

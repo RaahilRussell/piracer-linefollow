@@ -47,7 +47,7 @@ def run_one(prof=None, seconds=40.0, speed=None, variant="current", overrides=No
     while w.t < seconds:
         clk.t = w.t
         x, found, both, age, motion, img = w.observe()
-        angle, thr, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges)
+        angle, thr, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges, source=w.edges_source)
         w.tick(angle, thr)
     return w, ctrl
 

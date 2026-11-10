@@ -29,8 +29,8 @@ import numpy as np
 from linetrack.config import Config
 from linetrack.controller import DRIVE, STEER_ONLY, Command, SteeringController
 from linetrack.detector import LeftLineDetector
-from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, fit_bend, speed_of_cmd,
-                                steer_for_curvature)
+from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, fit_bend, pursuit_goal,
+                                pursuit_steer, speed_of_cmd, steer_for_curvature)
 
 # extra keys in line_config.py that are not Config fields
 _EXTRAS = {"RESET_AFTER_GAP_S": 0.3, "SHOW_OVERLAY": True, "TOP_THROTTLE": 0.35, "RECORD": False,
@@ -42,7 +42,10 @@ _EXTRAS = {"RESET_AFTER_GAP_S": 0.3, "SHOW_OVERLAY": True, "TOP_THROTTLE": 0.35,
            "LOST_COAST_S": 0.0, "LOST_SLOW_S": 0.0,
            "SPEED_STRAIGHT": 0.0, "SPEED_TRANSITION": 0.0, "SPEED_CORNER": 0.0,
            "SPEED_RAMP_DOWN": 1.0, "SPEED_RAMP_UP": 0.4,
-           "AUTOTUNE_START": 0.55, "AUTOTUNE_STEP": 0.03, "AUTOTUNE_WINDOW_S": 10.0,
+           "AUTOTUNE_START": 0.55, "AUTOTUNE_STEP": 0.03, "AUTOTUNE_WINDOW_S": 10.0, "TUNE_RACE_FIRST": True,
+           "RACE_SPEED_STRAIGHT": None, "RACE_SPEED_TRANSITION": None, "RACE_SPEED_CORNER": None,
+           "SAFE_SPEED_STRAIGHT": None, "SAFE_SPEED_TRANSITION": None, "SAFE_SPEED_CORNER": None,
+           "TRACK_LENGTH_M": 4.98, "TRACK_CURVE_SHARE": 0.71,
            # car model for corner geometry (linetrack/geometry.py); None = the model defaults
            "WHEELBASE_M": None, "STEER_MAX_DEG": None, "CAMERA_FOV_DEG": None, "CAM_HEIGHT_M": None,
            "CAM_PITCH_DEG": None, "CAM_FWD_M": None, "GRIP_MU": None, "BRAKE_DECEL": None,
@@ -96,6 +99,7 @@ class LineDetectorPart:
         self.model = model or CarModel()
         self.ground = None           # GroundModel, built on first frame
         self.bend = None             # corner ahead (linetrack.geometry.Bend) from the tracked edge
+        self.path = None             # (edge ground points near -> far, "left"/"right", lane width ratio) for pure pursuit
         self.show_overlay = show_overlay
         self.clock = clock
         self.detector = LeftLineDetector(cfg)
@@ -106,6 +110,12 @@ class LineDetectorPart:
         self.proc_ms = 0.0
         self._small = None
         self.motion = None   # camera motion score: ~0.9 still, ~2.5+ rolling, ~17 normal driving
+
+    def attach(self, pilot: "LineFollowerPilot"):
+        """Connect a pilot: it reads this detector's corner geometry and edge path each frame."""
+        self.pilot = pilot
+        pilot.bend_source = lambda: self.bend       # corner geometry for sections / feedforward / corner speed
+        pilot.path_source = lambda: self.path       # edge ground points for pure pursuit
 
     def run(self, img_rgb):
         now = self.clock()
@@ -133,13 +143,18 @@ class LineDetectorPart:
     def _bend(self, det, w, h):
         """Curvature of the corner ahead from the tracked inside edge (left line, or the right line
         while it's the backup). Never lets geometry trouble stop the car loop."""
+        self.path = None
         try:
             if not det.found:
                 return None
             if self.ground is None:
                 self.ground = GroundModel(self.model)
             pts = det.edge_points if det.source == "left" else det.right_points
-            return fit_bend(self.ground.project(pts, w, h))
+            if pts is not None and len(pts):
+                pts = pts[np.argsort(-pts[:, 1])]           # bottom of the image (near the car) first
+            ground = self.ground.project(pts, w, h)
+            self.path = (ground, det.source, float(getattr(det, "lane_width_ratio", 0.0) or self.cfg.lane_width_ratio))
+            return fit_bend(ground)
         except Exception:
             return None
 
@@ -287,6 +302,8 @@ class LineFollowerPilot:
         self.cfg = cfg
         self.model = model or CarModel()
         self.bend_source = None     # callable -> Bend | None (drive_line.py: lambda: det.bend)
+        self.path_source = None     # callable -> LineDetectorPart.path (edge ground points) for pure pursuit
+        self.pursuit_goal = None    # pure-pursuit goal point this frame (x, y) m, or None
         self.curvature = None       # smoothed path curvature ahead, 1/m (+ left)
         self.corner_cap = None      # throttle cap from the corner planner this frame (None = not limiting)
         self.speed_target = None    # section-aware target before the slew limiter
@@ -330,11 +347,21 @@ class LineFollowerPilot:
         lo, hi = sorted((self.cfg.corner_blend_start, self.cfg.corner_blend_full))
         w = min(1.0, max(0.0, (abs(curvature) - lo) / max(hi - lo, 1e-6)))
         candidate = "corner" if w >= 0.65 else "straight" if w <= 0.35 else self.section_now
+        if candidate == "straight" and self._holding_corner():
+            candidate = "corner"   # the road ahead looks straight but the car is still turning
         if candidate != self._section_candidate:
             self._section_candidate, self._section_since = candidate, now
         if now - self._section_since >= 0.15:
             self.section_now = candidate
         return self.section_now
+
+    def _holding_corner(self):
+        """Curve exit hold: the camera sees the straight before the car has finished turning.
+        Keep curve gains/speed until the steering actually unwinds."""
+        last = self.last_cmd
+        thr = getattr(self.cfg, "corner_exit_steer", 0.0) or 0.0
+        return (thr > 0 and self.section_now == "corner" and last is not None
+                and abs(getattr(last, "angle", 0.0)) >= thr * self.cfg.max_steering)
 
     def _curvature(self, bend):
         """Smoothed curvature of the corner ahead; None when nothing usable is in view."""
@@ -364,9 +391,36 @@ class LineFollowerPilot:
         kd = skd + (ckd - skd) * w
         return kp, kd, w, ("corner" if w >= 0.5 else "straight")
 
-    def run(self, mode, x_ratio, found, frame_age, motion=None, both=True, bend=None):
+    def _pursuit(self, path):
+        """Pure-pursuit steering command for this frame, or None when the edge can't be aimed at
+        (then the frame falls back to plain PD). Never lets geometry trouble stop the car loop."""
+        self.pursuit_goal = None
+        try:
+            if path is None:
+                return None
+            ground, source, lane_ratio = path
+            if self.ground is None:
+                self.ground = GroundModel(self.model)
+            c = self.cfg
+            # where the tracked edge runs beside the car when it rides at the target
+            lateral = self.ground.lateral_at(c.lookahead_ratio, c.target_x_ratio + (lane_ratio if source == "right" else 0.0))
+            if lateral is None:
+                return None
+            v = speed_of_cmd(self.model, self._last_drive_thr)
+            ld = max(0.15, c.pursuit_ld_m + c.pursuit_ld_gain_s * v)
+            goal = pursuit_goal(ground, lateral, ld)
+            if goal is None:
+                return None
+            self.pursuit_goal = goal
+            return pursuit_steer(goal, self.model.wheelbase_m, max(1.0, c.steer_max_deg))
+        except Exception:
+            return None
+
+    def run(self, mode, x_ratio, found, frame_age, motion=None, both=True, bend=None, path=None):
         if bend is None and self.bend_source is not None:
             bend = self.bend_source()
+        if path is None and self.path_source is not None:
+            path = self.path_source()
         now = self.clock()
         # not called while in 'user' mode -> start fresh after a mode switch
         if self._t_last is None or now - self._t_last > self.reset_after_gap_s:
@@ -385,9 +439,23 @@ class LineFollowerPilot:
         age = float("inf") if frame_age is None else frame_age
         ctl_mode = DRIVE if mode == "local" else STEER_ONLY
         k = self._curvature(bend) if found else None
-        ff, target = 0.0, None
-        if k is not None and self.cfg.ff_gain > 0:
-            ff = steer_for_curvature(self.model, k)
+        ff, target, ff_scale, gain_scale = 0.0, None, None, 1.0
+        pursuit = self._pursuit(path) if (found and self.cfg.pure_pursuit) else None
+        if not self.cfg.pure_pursuit:
+            self.pursuit_goal = None
+        if pursuit is not None:
+            # pure pursuit steers; PD on the lookahead row stays as a small correction
+            ff, ff_scale = pursuit, 1.0
+            gain_scale = min(1.0, max(0.0, self.cfg.pursuit_pd))
+            if k is not None and gain_scale > 0:
+                # In a curve the edge sits left of the target even when the car is exactly on its
+                # line. Aim the PD correction at where the edge SHOULD be, or it adds a second
+                # helping of steering and the car cuts the inside line.
+                xe = self.ground.expected_x_ratio(self.cfg.lookahead_ratio, self.cfg.target_x_ratio, k)
+                if xe is not None:
+                    target = xe
+        elif k is not None and self.cfg.ff_gain > 0:
+            ff = steer_for_curvature(self.model, k, max(1.0, self.cfg.steer_max_deg))
             # aim PD at where the edge SHOULD appear in this corner, by the same fraction as the
             # feedforward (otherwise PD and feedforward both steer for the curve: too tight)
             if self.ground is None:
@@ -397,9 +465,12 @@ class LineFollowerPilot:
                 target = self.cfg.target_x_ratio + self.cfg.ff_gain * (xe - self.cfg.target_x_ratio)
         self.target_now = target
         kp, kd, corner_weight, section = self._section_gains(k)
+        if k is not None and self._holding_corner():
+            kp, kd, corner_weight, _ = self._section_gains(float("inf"))
         section = self._confirmed_section(k, now)
         cmd = self.ctrl.update(x_ratio, bool(found), now, dt, age, ctl_mode, ff=ff, target=target,
-                               gains=(kp, kd), corner_weight=corner_weight, section=section)
+                               gains=(kp * gain_scale, kd * gain_scale), corner_weight=corner_weight,
+                               section=section, ff_scale=ff_scale)
         cmd.section = section
         cmd.corner_weight = corner_weight
         throttle = min(max(cmd.throttle, 0.0), self.cfg.max_throttle)

@@ -28,10 +28,11 @@ G = 9.81
 @dataclass
 class CarModel:
     wheelbase_m: float = 0.1741          # Waveshare spec
-    steer_max_deg: float = 25.0          # wheel angle at steering command +/-1 (ASSUMED until measured)
+    steer_max_deg: float = 18.0          # wheel angle at steering command +/-1 (FITTED to recorded runs, not measured;
+                                         # the pilot steers with Config.steer_max_deg, which line_config keeps equal)
     camera_fov_deg: float = 160.0        # diagonal, equidistant fisheye (ASSUMED interpretation)
-    cam_height_m: float = 0.17           # ASSUMED
-    cam_pitch_deg: float = 8.0           # derived from the horizon in real frames
+    cam_height_m: float = 0.12           # ESTIMATED (Waveshare photos + mat lane width; sim/profile.json), not measured
+    cam_pitch_deg: float = 15.0          # ESTIMATED (camera fit to real frames + line spacing), not measured
     cam_fwd_m: float = 0.15              # camera ahead of the rear axle (ASSUMED)
     cam_roll_deg: float = 0.0            # camera rotated about its viewing axis (+ = image turned clockwise)
     lens_k1: float = 0.0                 # fisheye distortion beyond equidistant: theta = rho * (1 + k1 * rho^2)
@@ -128,6 +129,15 @@ class GroundModel:
         u = cand[np.argmin(np.abs(cand - u0))]
         return float((u + 0.5) / m.image_w)
 
+    def lateral_at(self, row_ratio: float, x_ratio: float) -> float | None:
+        """Lateral ground offset (Y, left +) of the point seen at this image position: where a line
+        that appears there runs beside the car when the car drives parallel to it."""
+        m = self.m
+        r = min(m.image_h - 1, int(row_ratio * m.image_h))
+        u = int(np.clip(round(x_ratio * m.image_w - 0.5), 0, m.image_w - 1))
+        y = self.gy[r, u]
+        return float(y) if np.isfinite(y) else None
+
     def row_distance(self, row_ratio: float) -> float:
         r = min(self.m.image_h - 1, int(row_ratio * self.m.image_h))
         return float(self.gx[r, self.m.image_w // 2])
@@ -196,10 +206,60 @@ def fit_bend(ground: np.ndarray, max_dist=1.4, min_pts=5, min_span=0.2, straight
     return Bend(float(k_path), k_edge, lat, x0, float(X.max()), int(len(g)), resid)
 
 
-def steer_for_curvature(m: CarModel, curvature: float) -> float:
-    """Steering command (-1 left .. +1 right) whose wheel angle follows this path curvature."""
+def steer_for_curvature(m: CarModel, curvature: float, steer_max_deg: float | None = None) -> float:
+    """Steering command (-1 left .. +1 right) whose wheel angle follows this path curvature.
+    steer_max_deg: full-lock wheel angle to use (the pilot passes Config.steer_max_deg)."""
     delta = math.degrees(math.atan(m.wheelbase_m * curvature))    # + = left
-    return float(np.clip(-delta / m.steer_max_deg, -1.0, 1.0))
+    return float(np.clip(-delta / (steer_max_deg or m.steer_max_deg), -1.0, 1.0))
+
+
+def pursuit_goal(ground: np.ndarray, lateral: float, lookahead: float, min_pts: int = 5,
+                 max_dist: float = 1.6, min_reach: float = 0.25):
+    """Pure-pursuit goal point: where the RIDE line is `lookahead` metres from the rear axle.
+
+    ground: the tracked edge's ground points (X forward, Y left +), ordered near -> far.
+    lateral: the edge's Y when the car rides at its target (left line > 0, right line < 0); the
+    ride line is the edge moved sideways by that much, so it passes through the car when on target.
+    Returns (x, y) or None when the edge is too short to aim at. If the edge ends before the
+    lookahead distance (it leaves the image in a tight curve) the farthest ride point is used."""
+    if ground is None or len(ground) < min_pts:
+        return None
+    g = np.asarray(ground, float)
+    g = g[(g[:, 0] > 0.05) & (np.hypot(g[:, 0], g[:, 1]) < max_dist)]
+    if len(g) < min_pts:
+        return None
+    if len(g) >= 7:                                   # 3-point moving average: pixel steps, not shape
+        g = np.stack([np.convolve(g[:, i], np.ones(3) / 3, mode="valid") for i in (0, 1)], 1)
+    t = np.gradient(g, axis=0)
+    n = np.hypot(t[:, 0], t[:, 1])
+    ok = n > 1e-6
+    if ok.sum() < 3:
+        return None
+    g, t = g[ok], t[ok] / n[ok, None]
+    ride = g - lateral * np.stack([-t[:, 1], t[:, 0]], 1)          # shift along the left normal
+    ride = ride[ride[:, 0] > 0.0]
+    if len(ride) < 2:
+        return None
+    d = np.hypot(ride[:, 0], ride[:, 1])
+    beyond = np.nonzero(d >= lookahead)[0]
+    if not len(beyond):
+        i = int(np.argmax(d))
+        return (float(ride[i, 0]), float(ride[i, 1])) if d[i] >= min_reach else None
+    i = int(beyond[0])
+    if i == 0:
+        return float(ride[0, 0]), float(ride[0, 1])
+    f = (lookahead - d[i - 1]) / max(d[i] - d[i - 1], 1e-9)
+    p = ride[i - 1] + f * (ride[i] - ride[i - 1])
+    return float(p[0]), float(p[1])
+
+
+def pursuit_steer(goal, wheelbase_m: float, steer_max_deg: float) -> float:
+    """Pure pursuit: wheel angle = atan(2 L sin(alpha) / Ld) for the goal point (x, y) seen from the
+    rear axle, as a steering command (-1 left .. +1 right)."""
+    x, y = goal
+    d2 = x * x + y * y
+    delta = math.degrees(math.atan2(2.0 * wheelbase_m * y, d2))    # sin(alpha) / Ld = y / Ld^2; + = left
+    return float(np.clip(-delta / steer_max_deg, -1.0, 1.0))
 
 
 def min_radius(m: CarModel) -> float:

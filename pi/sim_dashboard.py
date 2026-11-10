@@ -34,8 +34,7 @@ def main(run_dir, port=8890):
     pilot = LineFollowerPilot(lcfg, crawl=crawl, single_line_stop_s=ex["SINGLE_LINE_STOP_S"],
                               coast_s=ex["LOST_COAST_S"], slow_s=ex["LOST_SLOW_S"])
     det = LineDetectorPart(lcfg)
-    det.pilot = pilot
-    pilot.bend_source = lambda: det.bend
+    det.attach(pilot)
     cap = make_throttle_cap(lcfg, ex)
     kill = KillSwitch()
     hub = webui.Hub(lcfg, pilot, det, crawl=crawl, cap=cap,
@@ -89,22 +88,33 @@ def main_sim(port=8890):
     webui.Hub.LIVE_NAME = "gain_schedule_live_sim.json"   # simulated passes must never count as car-verified
     lcfg, ex = load_line_config(line_config)
     crawl = AutoCrawl(start=ex["CRAWL_START"], hi=1.0)
-    pilot = LineFollowerPilot(lcfg, crawl=crawl, single_line_stop_s=0.0,
+    from donkey_part import SpeedPlan
+    plan = None
+    if ex["SPEED_STRAIGHT"] > 0:   # same speed plan the car builds in drive_line.py
+        plan = SpeedPlan(ex["SPEED_STRAIGHT"], ex["SPEED_CORNER"] or ex["SPEED_STRAIGHT"],
+                         transition=ex["SPEED_TRANSITION"] or None,
+                         ramp_down=ex["SPEED_RAMP_DOWN"], ramp_up=ex["SPEED_RAMP_UP"])
+    pilot = LineFollowerPilot(lcfg, crawl=crawl, single_line_stop_s=0.0, speed_plan=plan,
                               coast_s=ex["LOST_COAST_S"], slow_s=ex["LOST_SLOW_S"])
     det = LineDetectorPart(lcfg)
-    det.pilot = pilot
-    pilot.bend_source = lambda: det.bend
+    det.attach(pilot)
     cap = make_throttle_cap(lcfg, ex)
     kill = KillSwitch()
     hub = webui.Hub(lcfg, pilot, det, crawl=crawl, cap=cap, data_dir=os.path.join(os.path.dirname(HERE), "runs"),
-                    tuning_path=os.path.join(HERE, "tuning_sim.json"), log_dir=os.path.join(os.path.dirname(HERE), "logs_sim"))
+                    tuning_path=os.path.join(HERE, "tuning_sim.json"), log_dir=os.path.join(os.path.dirname(HERE), "logs_sim"),
+                    track_length_m=ex["TRACK_LENGTH_M"], track_curve_share=ex["TRACK_CURVE_SHARE"],
+                        race_speeds=webui.race_speeds(ex), safe_speeds=webui.safe_speeds(ex))
     hub.kill = kill
-    hub.autotuner = AutoTuner(pilot, start=ex["AUTOTUNE_START"], step=ex["AUTOTUNE_STEP"],
-                              window_s=ex["AUTOTUNE_WINDOW_S"], ceiling=cap.limit("local"), log=hub.log)
+    hub.attach_autotuner(AutoTuner(pilot, start=ex["AUTOTUNE_START"], step=ex["AUTOTUNE_STEP"],
+                              window_s=ex["AUTOTUNE_WINDOW_S"], ceiling=cap.limit("local"), log=hub.log,
+                                  race_first=bool(ex["TUNE_RACE_FIRST"])))
     wmode, wdrive, guard, tele = webui.WebModePart(hub), webui.WebDrivePart(hub), webui.WebGuardPart(hub), webui.TelemetryPart(hub)
     prof = Profile.load()
     hub.source, hub.source_detail = "simulator", f"PiRacer simulator ({len(prof.assumed_in_use())} assumed values)"
-    w = World(prof, vision="rendered", seed=1, target_ratio=lcfg.target_x_ratio, row_ratio=lcfg.lookahead_ratio)
+    # Riding over the inside line is accepted in the race; only running wide (or going 10 cm past the
+    # inside tape) puts the simulated car back. Same rule as tools/simdrive.py.
+    w = World(prof, vision="rendered", seed=1, target_ratio=lcfg.target_x_ratio, row_ratio=lcfg.lookahead_ratio,
+              inside_tolerance_m=0.10)
     srv, url = webui.start_server(hub, port=port)
     hub.log("info", f"PiRacer simulator ({len(prof.assumed_in_use())} assumed values in sim/profile.json). "
                     "Off track = car put back at the start.", "start")
@@ -137,6 +147,8 @@ def main_sim(port=8890):
             if w.metrics.off_track > seen_off:
                 seen_off = w.metrics.off_track
                 hub.log("bad", "Simulated car went off track: put back at the start", "line")
+                if hub.autotuner is not None:
+                    hub.autotuner.report_off_track()
             tele.run(mode, u_thr, steering, throttle, overlay, motion, both, x, found)
             time.sleep(max(0.0, w.dt_ctrl - (time.monotonic() - t0)))
     except KeyboardInterrupt:

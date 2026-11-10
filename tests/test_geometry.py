@@ -15,7 +15,7 @@ from donkey_part import LineFollowerPilot, load_line_config  # noqa: E402
 from linetrack.config import Config  # noqa: E402
 from linetrack.controller import DRIVE, SteeringController  # noqa: E402
 from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, corner_speed,  # noqa: E402
-                                fit_bend, min_radius, speed_of_cmd, steer_for_curvature)
+                                fit_bend, min_radius, pursuit_goal, pursuit_steer, speed_of_cmd, steer_for_curvature)
 
 
 def arc(R, lat=0.15, s_max=1.0, n=12, noise=0.0, seed=0):
@@ -94,7 +94,7 @@ class TestFormulas(unittest.TestCase):
     def test_steering_follows_atan_and_sign(self):
         k = 1 / 0.861                                    # the stage corner, path radius
         cmd = steer_for_curvature(self.m, k)
-        self.assertAlmostEqual(cmd, -math.degrees(math.atan(0.1741 * k)) / 25.0, places=6)   # left = negative
+        self.assertAlmostEqual(cmd, -math.degrees(math.atan(0.1741 * k)) / self.m.steer_max_deg, places=6)   # left = negative
         self.assertLess(cmd, 0)
         self.assertGreater(steer_for_curvature(self.m, -k), 0)
         self.assertEqual(steer_for_curvature(self.m, 1 / (0.5 * min_radius(self.m))), -1.0)   # clipped
@@ -192,6 +192,96 @@ class TestControllerAndPilot(unittest.TestCase):
         self.assertAlmostEqual(p.throttle(0.0, 0.8, 1.0, 0.1), 0.60)  # 0.1 s of controlled braking
 
 
+class TestFullLockAngle(unittest.TestCase):
+    """One full-lock wheel angle for the car, the tools and the simulator (it was 25 on the car and
+    18 in the simulator, so feedforward under-steered by 28%)."""
+
+    def test_car_config_and_simulator_agree(self):
+        from sim.params import Profile
+        table = Profile.load().steer_angle_table
+        sim_lock = max(abs(row[1]) for row in table)
+        cfg, extras = load_line_config(line_config)
+        self.assertEqual(cfg.steer_max_deg, sim_lock)
+        self.assertEqual(extras["STEER_MAX_DEG"], sim_lock)
+        self.assertEqual(Config().steer_max_deg, sim_lock)
+        self.assertEqual(CarModel().steer_max_deg, sim_lock)
+
+    def test_feedforward_uses_the_slider_value(self):
+        cfg = Config(ff_gain=1.0, pure_pursuit=False, max_steering=1.0, steering_smoothing=0.0, steering_rate_limit=100.0)
+        k = 1 / 0.69
+        out = {}
+        for lock in (18.0, 25.0):
+            cfg.steer_max_deg = lock
+            t = [0.0]
+            p = LineFollowerPilot(cfg, clock=lambda: t[0])
+            for _ in range(5):
+                t[0] += 0.05
+                p.run("local_angle", cfg.target_x_ratio, True, 0.0, bend=Bend(k, k, 0.1, 0.3, 1.0, 10, 0.0))
+            out[lock] = p.last_cmd.ff
+        self.assertAlmostEqual(out[18.0], -math.degrees(math.atan(0.1741 * k)) / 18.0, places=4)
+        self.assertAlmostEqual(out[25.0] / out[18.0], 18.0 / 25.0, places=4)
+
+
+class TestPurePursuit(unittest.TestCase):
+    L = 0.1741
+
+    @staticmethod
+    def edge(radius=None, lateral=0.10, n=30, reach=0.9):
+        """Ground points of a left edge `lateral` m left of a car riding its line: straight, or an arc
+        (the car's path has `radius`, the edge is the concentric circle inside it)."""
+        if radius is None:
+            return np.stack([np.linspace(0.25, reach, n), np.full(n, lateral)], 1)
+        a = np.linspace(0.25 / radius, reach / radius, n)
+        r = radius - lateral
+        return np.stack([r * np.sin(a), radius - r * np.cos(a)], 1)
+
+    def test_on_the_line_it_steers_exactly_the_curve(self):
+        self.assertAlmostEqual(pursuit_steer(pursuit_goal(self.edge(), 0.10, 0.6), self.L, 18.0), 0.0, places=3)
+        for radius in (0.6, 0.69, 1.0):
+            for ld in (0.4, 0.55, 0.7):       # any lookahead gives the same answer on a circle
+                cmd = pursuit_steer(pursuit_goal(self.edge(radius, reach=1.0 * radius), 0.10, ld), self.L, 18.0)
+                self.assertAlmostEqual(cmd, -math.degrees(math.atan(self.L / radius)) / 18.0, delta=0.03)
+
+    def test_sign_and_offset(self):
+        # edge further left than it should be = the car has drifted right of its line -> steer left
+        self.assertLess(pursuit_steer(pursuit_goal(self.edge(lateral=0.20), 0.10, 0.6), self.L, 18.0), -0.05)
+        self.assertGreater(pursuit_steer(pursuit_goal(self.edge(lateral=0.02), 0.10, 0.6), self.L, 18.0), 0.05)
+        # a right-hand line (negative lateral) rides the same way
+        right = self.edge(lateral=-0.25)
+        self.assertAlmostEqual(pursuit_steer(pursuit_goal(right, -0.25, 0.6), self.L, 18.0), 0.0, places=3)
+
+    def test_short_edge_uses_its_far_end_and_too_short_is_refused(self):
+        goal = pursuit_goal(self.edge(reach=0.45), 0.10, 0.8)
+        self.assertLess(math.hypot(*goal), 0.5)                       # never extrapolates past what it sees
+        self.assertIsNone(pursuit_goal(self.edge(n=3), 0.10, 0.6))
+        self.assertIsNone(pursuit_goal(np.zeros((0, 2)), 0.10, 0.6))
+
+    def test_pilot_uses_pursuit_and_falls_back_to_pd_without_an_edge(self):
+        cfg = Config(pure_pursuit=True, pursuit_pd=0.0, pursuit_ld_m=0.5, pursuit_ld_gain_s=0.0, kp=3.5, kd=0.0,
+                     max_steering=1.0, steering_smoothing=0.0, steering_rate_limit=100.0, target_x_ratio=0.40)
+        t = [0.0]
+        p = LineFollowerPilot(cfg, clock=lambda: t[0])
+        lateral = GroundModel(p.model).lateral_at(cfg.lookahead_ratio, cfg.target_x_ratio)
+        t[0] += 0.05
+        p.run("local_angle", 0.30, True, 0.0, path=(self.edge(lateral=lateral), "left", 0.47))
+        self.assertIsNotNone(p.pursuit_goal)
+        self.assertAlmostEqual(p.last_cmd.angle, 0.0, places=2)      # on its line: the image-row error is ignored (PD share 0)
+        t[0] += 0.05
+        p.run("local_angle", 0.30, True, 0.0, path=None)            # no edge geometry this frame -> plain PD
+        self.assertIsNone(p.pursuit_goal)
+        self.assertAlmostEqual(p.last_cmd.angle, 3.5 * (0.30 - 0.40), places=3)
+
+    def test_race_defaults_lap_the_calibrated_track_without_running_wide(self):
+        sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import simdrive
+        import line_config as lc
+        r = simdrive.drive(straight=lc.RACE_SPEED_STRAIGHT, corner=lc.RACE_SPEED_CORNER, seconds=20, seed=1)  # race values
+        self.assertTrue(simdrive.build()[0].pure_pursuit)
+        self.assertEqual((r["wide"], r["inside"]), (0, 0))
+        self.assertGreaterEqual(r["laps"], 4)
+        self.assertLess(r["lap"], 3.7)
+
+
 class TestRecorder(unittest.TestCase):
     def test_runs_log_curvature_for_validation(self):
         import csv
@@ -230,7 +320,7 @@ class TestInSimulator(unittest.TestCase):
         while w.t < 20:
             clk.t = w.t
             x, found, both, age, motion, img = w.observe()
-            a, th, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges)
+            a, th, _ = ctrl.step(x, found, both, age, motion, img, edges=w.edges, source=w.edges_source)
             w.tick(a, th)
             if ctrl.pilot.curvature is not None:
                 ks.append(ctrl.pilot.curvature)
@@ -241,16 +331,20 @@ class TestInSimulator(unittest.TestCase):
         self.assertAlmostEqual(float(np.median(corner)), k_true, delta=0.15 * k_true)
         self.assertEqual(w.metrics.off_track, 0)
 
-    def test_feedforward_helps_at_top_speed(self):
+    def test_feedforward_stays_off_because_it_does_not_help(self):
+        # With the camera re-estimated on Nov 10 (0.12 m / 15 deg) curvature feedforward no longer beats plain
+        # PD in the simulator (0.75 throttle: 14 PD vs 25 PD + feedforward off-tracks over 10 draws), so the
+        # car keeps it off. If the camera is measured and this flips, re-evaluate FF_GAIN.
         sys.path.insert(0, os.path.join(ROOT, "tools"))
+        import line_config as lc
         from backtest_corner import run
         from sim.params import Profile
         from sim.tune import monte_carlo_profiles
-        prof = Profile.load()
-        draws = monte_carlo_profiles(prof, n=10, seed=7)
-        pd = sum(run(q, 1.0, {"kp": 1.5, "kd": 0.3}, 25, 3)["off_track"] for q in draws)
-        ff = sum(run(q, 1.0, {"kp": 1.5, "kd": 0.3, "ff_gain": 0.6}, 25, 3)["off_track"] for q in draws)
-        self.assertLess(ff, pd)
+        self.assertEqual(lc.FF_GAIN, 0.0)
+        draws = monte_carlo_profiles(Profile.load(), n=10, seed=7)
+        pd = sum(run(q, 0.75, {"kp": 1.5, "kd": 0.3}, 25, 3)["off_track"] for q in draws)
+        ff = sum(run(q, 0.75, {"kp": 1.5, "kd": 0.3, "ff_gain": 0.6}, 25, 3)["off_track"] for q in draws)
+        self.assertGreaterEqual(ff, pd)
 
 
 if __name__ == "__main__":

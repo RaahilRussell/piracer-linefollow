@@ -63,8 +63,7 @@ def build_parts():
     model = car_model(extras)
     pilot.model = model
     det = LineDetectorPart(lcfg, show_overlay=extras["SHOW_OVERLAY"], model=model)
-    det.pilot = pilot
-    pilot.bend_source = lambda: det.bend      # corner geometry for feedforward / corner speed
+    det.attach(pilot)                          # corner geometry + edge path for the pilot
     return lcfg, extras, det, pilot
 
 
@@ -81,7 +80,9 @@ def drive(use_joystick: bool, myconfig: str):
     hub = None
     if extras["WEB_UI"]:
         hub = webui.Hub(lcfg, pilot, det, crawl=pilot.crawl, cap=cap, data_dir=os.path.join(HERE, "data"),
-                        tuning_path=os.path.join(HERE, "tuning.json"), log_dir=os.path.join(HERE, "logs"))
+                        tuning_path=os.path.join(HERE, "tuning.json"), log_dir=os.path.join(HERE, "logs"),
+                        track_length_m=extras["TRACK_LENGTH_M"], track_curve_share=extras["TRACK_CURVE_SHARE"],
+                        race_speeds=webui.race_speeds(extras), safe_speeds=webui.safe_speeds(extras))
         hub.log("info", f"Program started (max speed: user {cap.limit('user'):.2f}, pilot steers "
                         f"{cap.limit('local_angle'):.2f}, full auto {cap.limit('local'):.2f})", "start")
         applied = hub.load_saved()
@@ -128,8 +129,9 @@ def drive(use_joystick: bool, myconfig: str):
         V.add(webui.TelemetryPart(hub), inputs=["user/mode", "user/throttle", "steering", "throttle",
                                                 "line/overlay", "line/motion", "line/both",
                                                 "line/x_ratio", "line/found"])
-        hub.autotuner = AutoTuner(pilot, start=extras["AUTOTUNE_START"], step=extras["AUTOTUNE_STEP"],
-                                  window_s=extras["AUTOTUNE_WINDOW_S"], ceiling=cap.limit("local"), log=hub.log)
+        hub.attach_autotuner(AutoTuner(pilot, start=extras["AUTOTUNE_START"], step=extras["AUTOTUNE_STEP"],
+                                  window_s=extras["AUTOTUNE_WINDOW_S"], ceiling=cap.limit("local"), log=hub.log,
+                                  race_first=bool(extras["TUNE_RACE_FIRST"])))
         hub.joystick = ctr if hasattr(ctr, "emergency_stop") else None
         hub.kill = kill
         hub.allow_poweroff = True

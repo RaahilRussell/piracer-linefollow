@@ -22,7 +22,7 @@ fi
 
 echo "== copying files into ~/linefollow"
 COPYFILE_DISABLE=1 tar --no-xattrs -czf - \
-  -C pi donkey_part.py drive_line.py line_config.py webui.py dashboard.html tuning.py autotune.py diagnose.py lap_tuning.py gain_schedule.json \
+  -C pi donkey_part.py drive_line.py line_config.py webui.py dashboard.html laptuner.html tuning.py autotune.py diagnose.py lap_tuning.py gain_schedule.json \
   -C .. linetrack/__init__.py linetrack/config.py linetrack/detector.py linetrack/controller.py linetrack/geometry.py \
   | "${SSH[@]}" 'mkdir -p ~/linefollow && tar -xzf - -C ~/linefollow'
 

@@ -10,10 +10,18 @@ for p in (os.path.join(ROOT, "pi"), ROOT):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import numpy as np  # noqa: E402
+
 import line_config  # noqa: E402
 from donkey_part import (AutoCrawl, LineDetectorPart, LineFollowerPilot, SpeedPlan,  # noqa: E402
                          car_model, load_line_config, make_throttle_cap)
 from linetrack.geometry import GroundModel, fit_bend  # noqa: E402
+
+
+# The KP/KD tools (gain schedule in sim/tune.py, the dashboard advisor, the classic auto-tune
+# strategies and their backtests) study PD steering: with pure pursuit and no PD share, KP and KD do
+# nothing. They start from these overrides so they keep analysing the PD law, whatever the car's default.
+PD_STEERING = {"pure_pursuit": False, "target_x_ratio": 0.40, "steering_smoothing": 0.35}
 
 
 class PilotController:
@@ -78,16 +86,27 @@ class PilotController:
             self.ground = GroundModel(self.model)
         return fit_bend(self.ground.project(edges, self.model.image_w, self.model.image_h))
 
-    def step(self, x, found, both, age, motion, image=None, edges=None):
+    def path_from_edges(self, edges, source="left"):
+        """Edge ground points for pure pursuit (near -> far), like LineDetectorPart.path."""
+        if edges is None or len(edges) < 2:
+            return None
+        if self.ground is None:
+            self.ground = GroundModel(self.model)
+        pts = np.asarray(edges, float)
+        pts = pts[np.argsort(-pts[:, 1])]
+        return self.ground.project(pts, self.model.image_w, self.model.image_h), source, self.cfg.lane_width_ratio
+
+    def step(self, x, found, both, age, motion, image=None, edges=None, source="left"):
         if image is not None:                         # rendered mode: run the real detector too
             import cv2
             if self.det is None:
                 self.det = LineDetectorPart(self.cfg, clock=self.clock, show_overlay=False, model=self.model)
             x, found, age, _, motion_img, both = self.det.run(image)
-            bend = self.det.bend
+            bend, path = self.det.bend, self.det.path
         else:
             bend = self.bend_from_edges(edges) if found else None
-        angle, thr = self.pilot.run("local", x, found, age, motion, both, bend=bend)
+            path = self.path_from_edges(edges, source) if found else None
+        angle, thr = self.pilot.run("local", x, found, age, motion, both, bend=bend, path=path)
         if self.cap is not None:
             thr = self.cap.run(thr, angle, "local")
         return angle, thr, self.pilot.last_cmd

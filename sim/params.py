@@ -15,7 +15,7 @@ import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PROFILE = os.path.join(HERE, "profile.json")
-STATUSES = ("verified", "measured", "assumed")
+STATUSES = ("verified", "measured", "assumed", "estimated")  # estimated = fitted/derived from real data, not measured
 
 
 class Profile:

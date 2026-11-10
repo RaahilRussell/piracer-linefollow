@@ -26,6 +26,17 @@ from sim.tune import LinearLoop  # noqa: E402
 P = Profile.load()
 
 
+def legacy_profile():
+    """The original assumed stadium (0.5 m curves, 0.53 m lane, 25 deg lock): fixed geometry for
+    the camera/detector tests, independent of the calibrated track."""
+    prof = Profile.load()
+    prof._e.pop("track_polyline", None)
+    prof._e["track_radius_m"]["value"], prof._e["track_straight_m"]["value"] = 0.5, 1.6
+    prof._e["lane_width_m"]["value"] = 0.53
+    prof._e["steer_angle_table"]["value"] = [[300, 25.0], [375, 0.0], [450, -25.0]]
+    return prof
+
+
 class TestProvenance(unittest.TestCase):
     def test_every_parameter_has_status_and_source(self):
         for k in P.names():
@@ -41,7 +52,7 @@ class TestProvenance(unittest.TestCase):
 
     def test_unknowns_are_not_claimed_as_known(self):
         for k in ("steer_angle_table", "speed_table", "mu_lat", "servo_rate_dps", "cam_height_m", "cam_pitch_deg", "accel_max"):
-            self.assertEqual(P.entry(k)["status"], "assumed", k)
+            self.assertIn(P.entry(k)["status"], ("assumed", "estimated"), k)   # never "measured"/"verified"
 
 
 class TestActuators(unittest.TestCase):
@@ -92,9 +103,10 @@ class TestPhysicsLimits(unittest.TestCase):
 
 class TestCamera(unittest.TestCase):
     def test_geometric_fast_path_matches_real_detector_on_rendered_frame(self):
-        cam, tr = Camera(P), Track.stadium(P)
-        off = target_offset(cam, None, 0.20, 0.62, P.tape_width_m)
-        pose = (0.4, -(P.tape_width_m / 2 + off), 0.0)
+        L = legacy_profile()
+        cam, tr = Camera(L), Track.stadium(L)
+        off = target_offset(cam, None, 0.20, 0.62, L.tape_width_m)
+        pose = (0.4, -(L.tape_width_m / 2 + off), 0.0)
         img = cam.render(pose, tr, np.random.default_rng(0))
         det = LeftLineDetector(Config()).detect(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         x_geo = cam.measure_row(pose, tr, 0.62, 0.47)[0]

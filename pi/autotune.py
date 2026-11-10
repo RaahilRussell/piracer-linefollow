@@ -67,8 +67,8 @@ def interp_schedule(schedule, throttle):
 @dataclass
 class AutoTuner:
     pilot: object                       # LineFollowerPilot (its .cfg is what the car uses)
-    start: float = 0.70                 # faster initial throttle for Lap Tuner trials
-    step: float = 0.08
+    start: float = 0.70                 # classic strategies only; the lap tuner starts from the speed plan
+    step: float = 0.04                  # straight step (line_config AUTOTUNE_STEP); curves use curve_step_ratio of it
     ceiling: float = 1.00               # never above this
     window_s: float = 10.0
     settle_s: float = 2.0               # ignore this long after any change
@@ -80,6 +80,20 @@ class AutoTuner:
     log: object = None                  # callable(level, text) for the dashboard log
     schedule: list = field(default_factory=list)   # [(throttle, kp, kd)] from the simulator
 
+    # Lap tuner rules (all adjustable from the dashboard)
+    curve_step_ratio: float = 0.5       # curve step = straight step x this
+    lost_grace_s: float = 0.3           # line must be gone this long to count as a line failure
+    min_tracked: float = 0.85           # section fails below this tracked fraction
+    straight_sat: float = 0.20          # straights: share of time at full lock that means too fast
+    curve_sat: float = 0.95             # curves: full lock is normal; only near-constant lock fails
+    weave_fast: float = 0.9             # swings/s that count as a fast weave
+    evidence: int = 40                  # samples per section before it can pass
+    kp_max: float = 3.5                 # the lap tuner never raises KP above this (higher KP crashed in curves)
+    confirm_laps: int = 2               # clean laps in a row needed at a speed before going faster
+    margin_steps: int = 1               # a section's race speed = its last clean speed minus this many steps
+    race_first: bool = True             # Start drives the race values first, then climbs (or steps down)
+    min_throttle: float = 0.45          # stepping down never goes below this (the motor stalls lower)
+    lap_source: object = None           # callable -> LapTimer.status() dict, for measured lap times in messages
     strategy: str = "ladder"
     section: str | None = None       # section mode: straight or corner
     stop_on_transition: bool = False
@@ -159,11 +173,17 @@ class AutoTuner:
         self.pilot.curvature = None
         self._reset_window()
         self._guided_begin()
-        skp, skd = self._get_active_gains()
         self._say("info", f"Section tune ready: {section} at {current:.2f}; place the car, then watch the next {self.window_s:.0f} s")
 
-    def begin_sections(self, speed=None, step=None):
-        """Tune both sections and raise their throttle after each clean pair of passes."""
+    def _set_steps(self, step=None):
+        """Straight and curve step from the rules. Curve step 0 (share 0) = curves never speed up."""
+        self._sections_step = min(0.12, max(0.01, float(self.step if step is None else step)))
+        self._corner_step = max(0.0, round(self._sections_step * self.curve_step_ratio + 1e-9, 2))
+
+    def begin_sections(self, speed=None, step=None, race=None):
+        """Tune both sections and raise their throttle after each clean pair of passes.
+        race: {"straight", "corner", "lap_s", "total_s", "laps"} when the speed plan now holds the race
+        values (webui applies them first): the tuner checks those before it climbs, and reports."""
         from donkey_part import SpeedPlan
         if self.state == "running":
             raise RuntimeError("Stop the current auto-tune first")
@@ -178,8 +198,17 @@ class AutoTuner:
         self.state, self.history, self.best, self.best_uniform, self.verified = "running", [], None, None, []
         self.phase = "collecting"
         self._retunes = 0
-        self._sections_step = min(0.12, max(0.01, float(self.step if step is None else step)))
+        self._set_steps(step)             # curves climb slower: they're where the car loses the line
+        self._race = dict(race, state="driving") if race else None
         self._sections_safe = None
+        self._frozen = {"straight": False, "corner": False}
+        self._limits = {}
+        self._laps = []
+        self._clean_streak = 0
+        self._first_retries = 0
+        self._lap_health = {}
+        self._lap_started = self.clock()
+        self._last_segment = None
         import copy
         plan = self._saved[6]
         self.pilot.speed_plan = copy.deepcopy(plan) if plan is not None else SpeedPlan(current, current)
@@ -192,9 +221,16 @@ class AutoTuner:
         c.max_throttle = max(c.max_throttle, self.ceiling)
         self._reset_window()
         self._guided_begin()
-        self._say("info", f"Tune both ready: straight {self.pilot.speed_plan.straight:.2f}, "
-                          f"curve {self.pilot.speed_plan.corner:.2f}; raises both by {self._sections_step:.2f} "
-                          f"after both pass, up to {self.ceiling:.2f}")
+        p = self.pilot.speed_plan
+        if self._race:
+            est = (f" Estimated lap {self._race['lap_s']:.2f} s, {self._race['laps']} laps {self._race['total_s']:.1f} s "
+                   f"(an estimate from the assumed speed table, no penalties)") if self._race.get("lap_s") else ""
+            self._say("info", f"Driving the race values first: straight {p.straight:.2f} / curve {p.corner:.2f}.{est} "
+                              f"After {max(1, int(self.confirm_laps))} clean lap(s) it climbs; if a section fails it steps down")
+        else:
+            self._say("info", f"Lap tuner ready: straight {p.straight:.2f}, curve {p.corner:.2f}; after both pass, "
+                              f"straight +{self._sections_step:.2f} and curve +{self._corner_step:.2f}, up to "
+                              f"{self.ceiling:.2f}. Each section stops climbing at its own limit while the other keeps going")
 
     def _guided_begin(self):
         self.pilot.resume_motion()
@@ -205,7 +241,25 @@ class AutoTuner:
         self._evidence = {"straight": 0, "corner": 0}
         self._attempts = {"straight": 0, "corner": 0}
         self._transitions = 0
+        self._lost_at = None            # a stale loss time from an earlier run must not skip the grace period
         self._reset_window()
+
+    def _race_report(self):
+        """The race values just passed their clean laps: say what they are worth."""
+        r = self._race
+        r["state"] = "passed"
+        st = self.lap_source() if self.lap_source else None
+        if st and st.get("mean"):
+            n, lap = r["laps"], st["mean"]
+            pen = st.get("race_penalty_s", 0.0)
+            r.update(measured_lap_s=lap, measured_total_s=round(n * lap + pen, 1), penalty_s=pen)
+            text = (f"measured lap {lap:.2f} s, {n} laps about {n * lap + pen:.1f} s"
+                    f" including {pen:.0f} s of penalties" + ("" if pen else " (none so far)"))
+        elif r.get("lap_s"):
+            text = f"estimated lap {r['lap_s']:.2f} s, {r['laps']} laps {r['total_s']:.1f} s (estimate, no lap timed yet)"
+        else:
+            text = "no lap time yet"
+        self._say("info", f"Race values clean at straight {r['straight']:.2f} / curve {r['corner']:.2f}: {text}. Now climbing")
 
     def _guided_end(self, result, message):
         if result != "passed":
@@ -225,6 +279,22 @@ class AutoTuner:
         self.pilot.stop_motion()
         self._say("info" if result == "passed" else "warn", message + "; driving stopped")
 
+    def _lap(self, result, change, plan=None):
+        """One row of the lap log: the speeds and gains this lap ran with, how it went, what changed."""
+        if self.strategy != "sections" or not hasattr(self, "_laps"):
+            return
+        c, p = self.pilot.cfg, plan or self.pilot.speed_plan
+        now = self.clock()
+        self._laps.append({
+            "lap": len(self._laps) + 1, "straight": round(p.straight, 3), "corner": round(p.corner, 3),
+            "straight_kp": round(c.straight_kp or c.kp, 2), "straight_kd": round(c.straight_kd or c.kd, 2),
+            "corner_kp": round(c.corner_kp or c.kp, 2), "corner_kd": round(c.corner_kd or c.kd, 2),
+            "result": result, "change": change, "seconds": round(now - getattr(self, "_lap_started", now), 1),
+            "health": dict(getattr(self, "_lap_health", {}))})
+        self._laps = self._laps[-60:]
+        self._lap_started = now
+        self._lap_health = {}
+
     def _save_sections_safe(self):
         import copy
         c = self.pilot.cfg
@@ -241,13 +311,40 @@ class AutoTuner:
     def _advance_sections_speed(self):
         from donkey_part import SpeedPlan
         plan = self.pilot.speed_plan
-        self._save_sections_safe()
-        straight = min(self.ceiling, round(plan.straight + self._sections_step, 2))
-        corner = min(straight, self.ceiling, round(plan.corner + self._sections_step, 2))
-        transition = min(straight, max(corner, round(plan.transition + self._sections_step, 2)))
+        frozen = getattr(self, "_frozen", {"straight": False, "corner": False})
+        if getattr(self, "_skip_lap_log", False):
+            self._save_sections_safe()     # called from a section limit: the restored plan (with margin) is the safe one
+        else:
+            self._lap("passed", "", plan)
+            self._clean_streak = getattr(self, "_clean_streak", 0) + 1
+            need = max(1, int(self.confirm_laps))
+            if self._clean_streak < need:
+                # Not proven yet: "last good" stays the previous fully confirmed speed, so a failure
+                # on the next lap rolls back to that and not to this half-checked one.
+                self._laps[-1]["change"] = f"Clean {self._clean_streak} of {need} at this speed; same speed again"
+                self._section_results = {"straight": "pending", "corner": "pending"}
+                self._evidence = {"straight": 0, "corner": 0}
+                self._attempts = {"straight": 0, "corner": 0}
+                self._transitions = 0
+                self._say("info", f"Clean lap {self._clean_streak}/{need} at straight {plan.straight:.2f} / "
+                                  f"curve {plan.corner:.2f}; repeating before going faster")
+                self._reset_window()
+                return
+            self._clean_streak = 0
+            self._save_sections_safe()     # this speed passed all its confirm laps: it is the new last good
+            if getattr(self, "_race", None) and self._race["state"] == "driving":
+                self._race_report()
+        s_step = 0.0 if frozen["straight"] else self._sections_step
+        c_step = 0.0 if frozen["corner"] else getattr(self, "_corner_step", self._sections_step)
+        straight = min(self.ceiling, round(plan.straight + s_step, 2))
+        corner = min(straight, self.ceiling, round(plan.corner + c_step, 2))
+        transition = min(straight, max(corner, round(plan.transition + max(s_step, c_step) / 2, 2)))
         if straight <= plan.straight + 1e-9 and corner <= plan.corner + 1e-9:
-            return self._guided_end("passed", f"Both sections passed at the speed ceiling "
-                                    f"(straight {plan.straight:.2f} / curve {plan.corner:.2f})")
+            why = ("both sections reached their limits" if all(frozen.values())
+                   else "the rest reached the speed ceiling" if any(frozen.values())
+                   else "both sections passed at the speed ceiling")
+            return self._guided_end("passed", f"Done: {why}. Fastest passing throttle: "
+                                    f"straight {plan.straight:.2f} / curve {plan.corner:.2f}")
         self.pilot.speed_plan = SpeedPlan(straight, corner, transition=transition,
                                           full_at=plan.full_at, ramp_down=plan.ramp_down,
                                           ramp_up=plan.ramp_up)
@@ -258,15 +355,119 @@ class AutoTuner:
         self._transitions = 0
         self.pilot.ctrl.reset()
         self.pilot.speed_plan.reset()
+        held = [n for n, f in (("straight", frozen["straight"]), ("curve", frozen["corner"])) if f]
+        if getattr(self, "_laps", None) and self._laps[-1]["result"] == "passed":
+            ups = [f"straight +{straight - plan.straight:.2f}" if straight > plan.straight + 1e-9 else "",
+                   f"curve +{corner - plan.corner:.2f}" if corner > plan.corner + 1e-9 else ""]
+            self._laps[-1]["change"] = "Faster next lap: " + ", ".join(u for u in ups if u)
         self._say("info", f"Both sections passed; increasing throttle to straight {straight:.2f} / "
-                          f"curve {corner:.2f} (step +{self._sections_step:.2f})")
+                          f"curve {corner:.2f}" + (f" ({' and '.join(held)} held at its limit)" if held else ""))
         self._reset_window()
 
-    def fail_sections(self):
-        """Let the driver flag a slow/stalled step and stop at the last passed throttle."""
-        if self.state != "running" or self.strategy != "sections":
+    def fail_sections(self, section=None):
+        """Driver flags a step. With a section ('straight'/'corner'), hold that section at its last
+        passing throttle and keep climbing the other; without one, stop at the last passed throttle."""
+        if self.state not in ("running", "paused") or self.strategy != "sections":
             raise RuntimeError("Start Tune both automatically before marking a speed step failed")
+        if section in ("straight", "corner"):
+            label = "Curve" if section == "corner" else "Straight"
+            return self._section_limit(section, f"Driver marked {label.lower()} throttle too fast")
         return self._guided_end("failed", "Driver marked this throttle step failed")
+
+    def adopt_user_gains(self):
+        """The driver changed KP/KD mid-ramp: make those the gains any later rollback returns to,
+        so a section limit never silently undoes a dashboard change."""
+        safe = getattr(self, "_sections_safe", None)
+        if self.state in ("running", "paused") and safe is not None:
+            c = self.pilot.cfg
+            self._sections_safe = (c.kp, c.kd, c.straight_kp, c.straight_kd, c.corner_kp, c.corner_kd) + tuple(safe[6:])
+        if self.state in ("running", "paused") and getattr(self, "_saved", None) is not None:
+            c = self.pilot.cfg
+            self._saved = (c.kp, c.kd, c.straight_kp, c.straight_kd, c.corner_kp, c.corner_kd) + tuple(self._saved[6:])
+
+    def report_off_track(self):
+        """The car left the track (simulator, or a future on-car detector). In Tune both this is a
+        limit for the section it was in (a curve if it just left one); other modes treat it as a fail."""
+        if self.state != "running":
+            return
+        if self.strategy == "sections":
+            name = self._segment or getattr(self, "_last_segment", None) or "corner"
+            if name == "straight" and getattr(self, "_last_segment", None) == "corner":
+                name = "corner"
+            return self._section_limit(name, "went off track")
+        if self.strategy == "section":
+            return self._guided_end("failed", "Went off track")
+        return self._judge(force_fail=True) if self._t else None
+
+    def _section_limit(self, name, why, stop=False):
+        """A section failed at the attempted throttle: put back the last passing settings, hold that
+        section there, and keep raising the other one. stop=True (line lost) pauses until the
+        driver puts the car back and re-selects Full Auto."""
+        label = "curve" if name == "corner" else "straight"
+        if getattr(self, "_sections_safe", None) is None:
+            # Nothing has passed yet: the starting speed was too fast for this section.
+            # Step it down and retry instead of giving up on the first lap.
+            self._first_retries = getattr(self, "_first_retries", 0) + 1
+            plan = self.pilot.speed_plan
+            step = self._sections_step if name == "straight" else getattr(self, "_corner_step", self._sections_step)
+            step = max(step, 0.01)          # stepping DOWN still works when the curve share is 0
+            tried = getattr(plan, name)
+            lower = round(max(self.min_throttle, tried - step), 2)
+            self._clean_streak = 0
+            if getattr(self, "_race", None) and self._race["state"] == "driving":
+                self._race["state"] = "stepped down"
+            if self._first_retries > 3 or lower >= tried - 1e-9:
+                return self._guided_end("failed", f"{why} ({label}) before any speed passed, even at {tried:.2f}")
+            self._lap(f"{label} limit", f"{why} before any pass: {label} {tried:.2f} → {lower:.2f}, retrying")
+            setattr(plan, name, lower)
+            plan.corner = min(plan.corner, plan.straight)
+            plan.transition = min(plan.straight, max(plan.corner, plan.transition))
+            plan.reset()
+            self.pilot.ctrl.reset()
+            self._section_results = {"straight": "pending", "corner": "pending"}
+            self._evidence = {"straight": 0, "corner": 0}
+            self._attempts = {"straight": 0, "corner": 0}
+            self._transitions = 0
+            self._reset_window()
+            if stop:
+                self.state = "paused"
+                self.pilot.stop_motion()
+                self._say("warn", f"{label.title()} {why} at {tried:.2f} on the first lap; retrying at {lower:.2f}. "
+                                  f"Put the car back on the line and re-select Full Auto")
+            else:
+                self._say("warn", f"{label.title()} {why} at {tried:.2f}; retrying at {lower:.2f}")
+            return
+        tried = getattr(self.pilot.speed_plan, name)
+        self._lap(f"{label} limit", f"{why}: {label} back to "
+                  f"{getattr(self._sections_safe[6], name):.2f} and held")
+        self._restore_sections_safe()
+        self._clean_streak = 0
+        step = self._sections_step if name == "straight" else getattr(self, "_corner_step", self._sections_step)
+        last_clean = getattr(self.pilot.speed_plan, name)
+        kept = round(max(self.min_throttle, last_clean - max(0, int(self.margin_steps)) * step), 2)
+        if kept < last_clean - 1e-9:
+            plan = self.pilot.speed_plan
+            setattr(plan, name, kept)
+            plan.corner = min(plan.corner, plan.straight)
+            plan.transition = min(plan.straight, max(plan.corner, plan.transition))
+            # the margin is part of the race settings, not a fresh unproven step
+            self._sections_safe = self._sections_safe[:6] + (__import__("copy").deepcopy(plan),) + self._sections_safe[7:]
+        self._frozen[name] = True
+        self._limits[name] = {"failed_at": round(tried, 3), "last_clean": round(last_clean, 3),
+                              "kept": round(kept, 3), "why": why}
+        self._say("bad", f"{label.title()} limit: {why} at {tried:.2f}; holding {label} at {kept:.2f}")
+        self._skip_lap_log = True
+        try:
+            self._advance_sections_speed()
+        finally:
+            self._skip_lap_log = False
+        if self.state != "running":
+            return
+        if stop:
+            self.state = "paused"
+            self.pilot.stop_motion()
+            self._say("warn", f"{label.title()} held at {kept:.2f}; next step is staged. Put the car back on the "
+                              f"line and re-select Full Auto to continue")
 
     def finish_section(self):
         if self.state != "running" or self.strategy not in ("section", "sections"):
@@ -282,7 +483,9 @@ class AutoTuner:
                 self._guided_end("insufficient", "No confirmed section samples")
             return
         h = tuning.analyze(self._t, self._e, self._s, self._p, self._d, self._k,
-                           max_steering=self.pilot.cfg.max_steering, min_samples=12)
+                           max_steering=self.pilot.cfg.max_steering, min_samples=12,
+                           min_tracked=self.min_tracked, weave_fast=self.weave_fast,
+                           sat_limit=self.curve_sat if name == "corner" else self.straight_sat)
         if not h.sufficient or h.seconds < 0.5:
             if self.strategy == "section":
                 self._guided_end("insufficient", "Section too short for a reliable result")
@@ -290,20 +493,39 @@ class AutoTuner:
         old = self.section
         self.section = name
         self.phase = name
+        if hasattr(self, "_lap_health"):
+            self._lap_health[name] = tuning.summary(h)
         fix = {k: v for k, v in h.suggest.items() if k in ("kp", "kd")}
-        verdict = "fail" if h.suggest.get("speed", 0) < 0 else "retune" if not h.healthy else "pass"
+        if not self._gains_matter():
+            fix = {}       # pure pursuit with no PD share: KP/KD do nothing, so only the speed can be judged
+        if self.strategy == "sections" and fix.get("kp", 1.0) > 1.0:
+            # "Lagging" in a curve is the steady offset of turning, not a weak KP; a short straight window
+            # usually clips a curve. Neither is a reason to steer harder (which caused off-tracks).
+            cur_kp = self._get_active_gains_for(name)[0]
+            if name == "corner" or h.seconds < 2.0 or cur_kp >= self.kp_max - 1e-9:
+                fix.pop("kp")
+        verdict = "fail" if h.suggest.get("speed", 0) < 0 else "retune" if (fix and not h.healthy) else "pass"
         lv, _ = self._record(verdict, h)
         self.section = old
         if verdict == "fail":
             self._section_results[name] = "failed"
+            if self.strategy == "sections":
+                return self._section_limit(name, tuning.summary(h))
             return self._guided_end("failed", f"{name.title()}: {tuning.summary(h)}")
         if verdict == "retune":
             self._attempts[name] += 1
             if not fix or self._attempts[name] > self.max_retunes:
+                if self.strategy == "sections":
+                    return self._section_limit(name, "gains did not settle within the attempt limit")
                 return self._guided_end("failed", f"{name.title()} did not settle within the attempt limit")
             self.section = name
+            before = self._get_active_gains()
             self._apply_fix(fix)
+            after = self._get_active_gains()
             self.section = old
+            label = "curve" if name == "corner" else name
+            self._lap("retune", f"{label} KP {before[0]:.2f}→{after[0]:.2f}, KD {before[1]:.2f}→{after[1]:.2f} "
+                                f"({tuning.summary(h).split(' -> ')[0].split(' · ')[-1]})")
             self._evidence = {"straight": 0, "corner": 0}
             self._section_results = {"straight": "pending", "corner": "pending"}
             self._transitions = 0
@@ -319,7 +541,7 @@ class AutoTuner:
             return
         self._evidence[name] += h.n
         # Several independently scored short segments can supply evidence without joining raw traces.
-        if self.strategy == "section" or self._evidence[name] >= 40:
+        if self.strategy == "section" or self._evidence[name] >= self.evidence:
             self._section_results[name] = "passed"
             self.best = lv
         needed = ("straight", "corner") if self.strategy == "sections" else (self.section,)
@@ -333,7 +555,20 @@ class AutoTuner:
     def _guided_update(self, cmd, tracking, section, now):
         if now - self._guided_started > 600:
             return self._guided_end("insufficient", "Trial timed out")
+        if section in ("straight", "corner"):
+            self._last_segment = section
+        if not tracking and self.strategy == "sections" and self.lost_grace_s > 0:
+            if getattr(self, "_lost_at", None) is None:
+                self._lost_at = now
+            if now - self._lost_at < self.lost_grace_s:
+                return            # a dropped frame or two is not a line failure
+        if tracking:
+            self._lost_at = None
         if not tracking:
+            self._lost_at = None
+            if self.strategy == "sections":
+                blame = self._segment or getattr(self, "_last_segment", None) or "corner"
+                return self._section_limit(blame, "line lost", stop=True)
             return self._guided_end("failed", "Tracking lost during trial")
         if self.strategy == "section" and self._segment is None and section != self.section:
             return
@@ -366,7 +601,7 @@ class AutoTuner:
             self._reset_window()
 
     def abort(self, why="stopped"):
-        if self.state != "running":
+        if self.state not in ("running", "paused"):
             return
         if self.strategy == "sections" and getattr(self, "_sections_safe", None) is not None:
             self._restore_sections_safe()
@@ -403,6 +638,15 @@ class AutoTuner:
     # ------------------------------------------------------------ per frame
     def update(self, mode, cmd, tracking: bool, section: str | None = None):
         """Call every loop with the pilot's latest command."""
+        if self.state == "paused":
+            # Waiting for the driver to put the car back; re-selecting Full Auto re-arms motion.
+            if mode == "local" and not self.pilot.motion_stopped and tracking:
+                self.state = "running"
+                self._guided_begin()
+                self.pilot.ctrl.reset()
+                p = self.pilot.speed_plan
+                self._say("info", f"Continuing at straight {p.straight:.2f} / curve {p.corner:.2f}")
+            return
         if self.state != "running":
             return
         if mode != "local":
@@ -448,6 +692,21 @@ class AutoTuner:
         self.history.append(lv)
         return lv, f"{self.phase} {plan.straight:.2f}/{plan.corner:.2f}, KP {kp:.2f} KD {kd:.2f}"
 
+    def _gains_matter(self):
+        """KP/KD are tuned only when PD steers. Under pure pursuit they are at most a small correction, and
+        the "weave" the health check sees is the image-row error that pursuit does not try to zero (it aims
+        at a point 0.45 m+ ahead), so lowering KP fixes nothing: in the simulator it drove KP 3.5 -> 0.5
+        and gave up below the starting speed. With pursuit, laps are judged on speed only (line kept,
+        steering not pinned, no off-track)."""
+        return not getattr(self.pilot.cfg, "pure_pursuit", False)
+
+    def _get_active_gains_for(self, name):
+        old, self.section = self.section, name
+        try:
+            return self._get_active_gains()
+        finally:
+            self.section = old
+
     def _get_active_gains(self):
         c = self.pilot.cfg
         if self.section == "straight":
@@ -474,6 +733,8 @@ class AutoTuner:
         kp, kd = self._get_active_gains()
         if "kp" in gain_fix:
             kp *= gain_fix["kp"]
+            if self.strategy == "sections" and gain_fix["kp"] > 1:
+                kp = min(kp, self.kp_max)
         if "kd" in gain_fix:
             kd = kd * gain_fix["kd"] if kd > 0 else (0.1 if gain_fix["kd"] > 1 else 0.0)
         self._set_active_gains(kp, kd)
@@ -641,6 +902,13 @@ class AutoTuner:
                 "result": self.result, "section_results": getattr(self, "_section_results", {}),
                 "transitions_observed": getattr(self, "_transitions", 0),
                 "speed_step": getattr(self, "_sections_step", self.step),
+                "corner_step": getattr(self, "_corner_step", None),
+                "frozen": getattr(self, "_frozen", {}),
+                "safe_straight": None if getattr(self, "_sections_safe", None) is None else round(self._sections_safe[6].straight, 3),
+                "safe_corner": None if getattr(self, "_sections_safe", None) is None else round(self._sections_safe[6].corner, 3),
+                "limits": getattr(self, "_limits", {}),
+                "laps": getattr(self, "_laps", []),
+                "race": getattr(self, "_race", None), "race_first": bool(self.race_first),
                 "message": self.message, "has_schedule": bool(self.schedule),
                 "straight": None if plan is None else round(plan.straight, 3),
                 "corner": None if plan is None else round(plan.corner, 3),

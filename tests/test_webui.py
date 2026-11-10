@@ -42,7 +42,7 @@ class TestKnobs(unittest.TestCase):
         out = hub.apply({"kp": 4.2, "kd": 99, "top_throttle": 5, "s_lo": 120.4, "bogus": 1})
         self.assertAlmostEqual(cfg.kp, 4.2)          # same object the controller reads every frame
         self.assertAlmostEqual(cfg.kd, 2.0)          # clamped to the knob's max
-        self.assertAlmostEqual(cap.top, 0.8)         # top speed can never exceed 0.8 from the web
+        self.assertAlmostEqual(cap.top, 1.0)         # clamped to the knob's max (full throttle since "Allow full-scale throttle")
         self.assertEqual(cfg.s_lo, 120)
         self.assertNotIn("bogus", out)
 
@@ -245,7 +245,9 @@ class TestHttp(unittest.TestCase):
             logs = json.load(urllib.request.urlopen(base + "/api/log?since=0", timeout=3))
             self.assertTrue(any("Pilot steers" in e["text"] or "Full auto" in e["text"] for e in logs))
             page = urllib.request.urlopen(base + "/", timeout=3).read()
-            self.assertIn(b"Line Follower", page)
+            self.assertIn(b"Lap Tuner", page)
+            classic = urllib.request.urlopen(base + "/classic", timeout=3).read()
+            self.assertIn(b"Line Follower", classic)
             srv.shutdown()
         finally:
             shutil.rmtree(d)

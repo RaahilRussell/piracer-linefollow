@@ -72,7 +72,10 @@ def _swing_peaks(t, e, hyst):
 
 
 def analyze(t, error, steering, p=None, d=None, tracking=None, max_steering=0.8,
-            hyst=0.02, min_samples=40) -> Health:
+            hyst=0.02, min_samples=40, min_tracked=0.85, sat_limit=0.20, weave_fast=0.9) -> Health:
+    """min_tracked: below this tracked fraction = line failure. sat_limit: share of time at full
+    steering that counts as too fast (curves legitimately sit near full lock, so the lap tuner
+    passes a higher limit there). weave_fast: swings/s that count as a fast weave."""
     t = np.asarray(t, float)
     e = np.asarray(error, float)
     s = np.asarray(steering, float)
@@ -146,16 +149,16 @@ def analyze(t, error, steering, p=None, d=None, tracking=None, max_steering=0.8,
     # Thresholds calibrated by sweeping KP/KD/speed in tools/sim_track.py (see HANDOFF.md);
     # re-check them against real runs before trusting them blindly.
     f, sug = h.findings, h.suggest
-    if h.tracked < 0.85:
+    if h.tracked < min_tracked:
         f.append(("bad", "lost", f"Line lost {100 * (1 - h.tracked):.0f}% of the time: too fast, or the line leaves view"))
         sug["speed"] = -1
-    if h.saturated > 0.20:
+    if h.saturated > sat_limit:
         f.append(("bad", "too_fast", f"Steering at its limit {100 * h.saturated:.0f}% of the time: too fast for the corners"))
         sug["speed"] = -1
-    elif h.falling_behind > 0.08 and h.saturated > 0.10:
+    elif h.falling_behind > 0.08 and h.saturated > min(0.10, sat_limit):
         f.append(("bad", "cant_turn", "Steering at its limit and still falling behind in turns: too fast for the corners"))
         sug["speed"] = -1
-    if h.swing_rate > 0.9:
+    if h.swing_rate > weave_fast:
         f.append(("bad", "weave", f"Weaving fast ({h.swing_rate:.1f} swings/s): KP too high"))
         sug["kp"] = 0.8
     elif h.swing_rate > 0.55 or (h.growth is not None and h.growth > 1.2 and h.swings >= 6 and h.swing_rate > 0.4):
