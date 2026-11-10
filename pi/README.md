@@ -7,7 +7,7 @@ Self-contained. It reads the car's settings from `~/mycar` but **never writes th
 | `drive_line.py` | Launcher. Reuses `~/mycar/manage.py`'s camera, web UI, gamepad and drivetrain helpers (imported, not edited). |
 | `line_config.py` | All line-follower settings (target, gains, throttle, safety). Edit this, not `myconfig.py`. |
 | `donkey_part.py` | `LineDetectorPart` (every mode, draws the web UI overlay) and `LineFollowerPilot` (pilot modes). |
-| `linetrack/` | Detector and PD controller (same code as on the Mac). |
+| `linetrack/` | Lane tracker (both tape lines, identity kept frame to frame) and PD controller (same code as on the Mac). |
 
 ## Offline check (no camera, no motors)
 ```bash
@@ -19,7 +19,7 @@ Stop any running `manage.py drive` first (only one program can own the camera an
 ```bash
 cd ~/linefollow && ~/env/bin/python drive_line.py --js
 ```
-Web UI: `http://<pi-ip>:8887`. It shows the detection overlay: green = tracked left edge, cyan = target, amber = right line (fallback).
+Web UI: `http://<pi-ip>:8887`. It shows the detection overlay: green = tracked left edge, cyan = target, amber = right line (fallback). `1-LINE` in the status bar = one line in view and it is known which; `1-LINE?` = one line in view, picked up on its own (the one-line safety stop is counting).
 
 Gamepad:
 - **Y = EMERGENCY STOP** (back to user mode, throttle 0).
@@ -66,11 +66,11 @@ Measure the car with `sim/CALIBRATION.md` before trusting the faster profiles (m
 ## Backtesting a change (on the Mac)
 ```bash
 python3 tools/backtest.py                 # current line_config vs every variant, on all recorded data
-python3 tools/backtest.py --variants old,baseline
+python3 tools/backtest.py --variants baseline,no_grow
 
 # Replay a new camera folder (for example, tomorrow's 15k frames)
 python3 tools/backtest.py --frames-dir /path/to/frames --dt 0.05 --datasets new_frames \
-  --variants baseline,confirm3,swap+coast --json /tmp/linefollow-backtest.json
+  --variants baseline,confirm2,no_coast --json /tmp/linefollow-backtest.json
 ```
 Add a variant to `VARIANTS` in `tools/backtest.py`. Turn something on in `line_config.py` only if it improves `wrong`/`stops` without hurting `tracked%`.
 

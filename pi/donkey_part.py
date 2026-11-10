@@ -128,7 +128,7 @@ class LineDetectorPart:
         age = now - self._t_new
         overlay = self.draw(img_rgb, det, age) if self.show_overlay else img_rgb
         x = det.x_ratio if det.found else None
-        return x, bool(det.found), age, overlay, self.motion, self.both_lines()
+        return x, bool(det.found), age, overlay, self.motion, self.identity_sure()
 
     def _bend(self, det, w, h):
         """Curvature of the corner ahead from the tracked inside edge (left line, or the right line
@@ -147,6 +147,13 @@ class LineDetectorPart:
         """True when the left line AND the right line are both identified."""
         d = self._det
         return bool(d is not None and d.found and d.source == "left" and d.right_x_ratio is not None)
+
+    def identity_sure(self) -> bool:
+        """True when it is known WHICH line is being followed: both are in view, or the one in
+        view has been tracked without a break since both were. This is what the pilot's
+        one-line safety stop looks at, so a turn that hides the inside line doesn't trip it."""
+        d = self._det
+        return bool(d is not None and d.found and d.sure)
 
     def draw(self, img_rgb, det, age):
         """Annotated copy of the camera image (RGB, same size, for the web UI)."""
@@ -173,7 +180,7 @@ class LineDetectorPart:
         cv2.rectangle(out, (0, 0), (W, 14), (0, 0, 0), -1)
         src = {"left": "L", "right": "R"}.get(det.source, "-")
         mv = "" if self.motion is None else f" mv{self.motion:.1f}"
-        mv += "" if self.both_lines() or not det.found else " 1-LINE"
+        mv += "" if self.both_lines() or not det.found else (" 1-LINE" if det.sure else " 1-LINE?")
         cv2.putText(out, f"{status} {src} c{det.confidence:.2f} {self.proc_ms:.0f}ms{mv}",
                     (2, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.32, col, 1, cv2.LINE_AA)
         if cmd is not None:  # steering bar along the bottom (only while pilot runs)
