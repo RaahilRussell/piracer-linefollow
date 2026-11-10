@@ -1,0 +1,1 @@
+Read `AGENTS.md` first and follow it. In short: read `CHANGELOG.md`, then `HANDOFF.md`, before changing anything. Never touch the Pi, deploy, commit or push without asking. Add a `CHANGELOG.md` entry for every behaviour or default change.

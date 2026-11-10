@@ -84,6 +84,44 @@ class TestKnobs(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class TestSavedTuningVsNewDefaults(unittest.TestCase):
+    """After a git pull + deploy with new line_config.py defaults, an older tuning.json must not win."""
+
+    def test_file_from_older_defaults_is_set_aside(self):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "tuning.json")
+            with open(path, "w") as f:                       # what an older version saved: no fingerprint
+                json.dump({"kp": 4.0, "target_x_ratio": 0.46}, f)
+            hub, cfg, *_ = make_hub(tuning=path)
+            target = cfg.target_x_ratio
+            self.assertEqual(hub.load_saved(), {})
+            self.assertEqual(cfg.target_x_ratio, target)      # line_config.py's value stays
+            self.assertFalse(os.path.exists(path))
+            self.assertTrue(any(n.startswith("tuning.json.stale-") for n in os.listdir(d)))
+        finally:
+            shutil.rmtree(d)
+
+    def test_file_saved_under_other_defaults_is_set_aside(self):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "tuning.json")
+            hub, cfg, *_ = make_hub(tuning=path)
+            hub.apply({"kp": 5.0})
+            hub.save()
+            hub2, cfg2, *_ = make_hub(tuning=path)
+            hub2.defaults_id = "different"                   # as if line_config.py changed since the save
+            hub2.load_saved()
+            self.assertNotAlmostEqual(cfg2.kp, 5.0)
+        finally:
+            shutil.rmtree(d)
+
+    def test_fingerprint_ignores_order_and_float_noise(self):
+        a = webui.defaults_fingerprint({"kp": 3.5, "target_x_ratio": 0.4})
+        self.assertEqual(a, webui.defaults_fingerprint({"target_x_ratio": 0.4 + 1e-12, "kp": 3.5}))
+        self.assertNotEqual(a, webui.defaults_fingerprint({"kp": 3.6, "target_x_ratio": 0.4}))
+
+
 class TestDriveAndStops(unittest.TestCase):
     def test_web_joystick_dead_man(self):
         clk = Clock()

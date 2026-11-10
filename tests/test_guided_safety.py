@@ -483,15 +483,15 @@ class RaceValuesFirst(unittest.TestCase):
         import webui
         from donkey_part import ThrottleCap, load_line_config, car_model
         path = os.path.join(tempfile.mkdtemp(), "tuning.json")
-        if saved:
-            with open(path, "w") as f:
-                json.dump(saved, f)
         cfg, ex = load_line_config(line_config)
         self.t = 0.0
         pilot = LineFollowerPilot(cfg, clock=lambda: self.t, model=car_model(ex),
                                   speed_plan=SpeedPlan(ex["SPEED_STRAIGHT"], ex["SPEED_CORNER"], transition=ex["SPEED_TRANSITION"]))
         hub = webui.Hub(cfg, pilot, None, cap=ThrottleCap(1.0), tuning_path=path, clock=lambda: self.t,
                         race_speeds=webui.race_speeds(ex), safe_speeds=webui.safe_speeds(ex))
+        if saved:                                  # a file saved under these same defaults (Hub.save stamps the id)
+            with open(path, "w") as f:
+                json.dump({**saved, "_defaults_id": hub.defaults_id}, f)
         hub.load_saved()
         hub.attach_autotuner(AutoTuner(pilot, clock=lambda: self.t, log=hub.log))
         hub.telemetry = {"mode": "local"}
@@ -618,10 +618,10 @@ class PresetsAndPage(unittest.TestCase):
         import tempfile
         hub, lc, webui = self.hub()
         path = os.path.join(tempfile.mkdtemp(), "tuning.json")
-        with open(path, "w") as f:
-            json.dump({"tune_margin_steps": 3, "tune_confirm_laps": 4}, f)
         cfg = hub.cfg
         hub2 = webui.Hub(cfg, hub.pilot, None, tuning_path=path)
+        with open(path, "w") as f:
+            json.dump({"tune_margin_steps": 3, "tune_confirm_laps": 4, "_defaults_id": hub2.defaults_id}, f)
         hub2.load_saved()
         hub2.attach_autotuner(AutoTuner(hub.pilot))
         self.assertEqual(hub2.autotuner.margin_steps, 3)

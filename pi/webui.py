@@ -134,6 +134,13 @@ PD_FALLBACK = {"pure_pursuit": 0, "ff_gain": 0.0, "target_x_ratio": 0.40, "steer
                "speed_straight": 0.75, "speed_corner": 0.70, "speed_transition": 0.75}
 
 
+def defaults_fingerprint(values: dict) -> str:
+    """Short stable id of a set of default knob values (order and float noise don't matter)."""
+    import hashlib
+    norm = {k: round(float(v), 6) for k, v in values.items() if isinstance(v, (int, float, bool))}
+    return hashlib.sha1(json.dumps(norm, sort_keys=True).encode()).hexdigest()[:12]
+
+
 class Hub:
     """Everything the car loop and the web pages share."""
 
@@ -184,6 +191,10 @@ class Hub:
         if cap is not None:  # keep the pilot's own limits in line with the Full-auto max
             self._set_auto_max(cap.limit("local"))
         self.defaults = self.knob_values()
+        # Fingerprint of the line_config.py defaults this program started with. tuning.json records it, so a
+        # file saved under OLDER defaults (before a git pull + deploy) is set aside instead of silently
+        # overriding the new ones.
+        self.defaults_id = defaults_fingerprint(self.defaults)
 
     # ------------------------------------------------------------ knobs
     def knob_values(self) -> dict:
@@ -452,6 +463,7 @@ class Hub:
             raise RuntimeError("no tuning file configured")
         with self.lock:
             vals = self.knob_values()
+        vals["_defaults_id"] = self.defaults_id
         tmp = self.tuning_path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(vals, f, indent=2)
@@ -460,12 +472,24 @@ class Hub:
         return self.tuning_path
 
     def load_saved(self) -> dict:
-        if self.tuning_path and os.path.exists(self.tuning_path):
+        """Apply tuning.json on top of line_config.py, but only if it was saved under the SAME defaults.
+        A file from older defaults (or unreadable) is renamed aside and the new defaults stay in force."""
+        if not (self.tuning_path and os.path.exists(self.tuning_path)):
+            return {}
+        try:
             with open(self.tuning_path) as f:
-                out = self.apply(json.load(f), quiet=True)
-            self.log("info", f"Loaded saved tuning ({os.path.basename(self.tuning_path)})", "tune")
-            return out
-        return {}
+                saved = json.load(f)
+        except (OSError, ValueError):
+            saved = None
+        if not isinstance(saved, dict) or saved.pop("_defaults_id", None) != self.defaults_id:
+            aside = f"{self.tuning_path}.stale-{time.strftime('%Y%m%d-%H%M%S')}"
+            os.replace(self.tuning_path, aside)
+            self.log("warn", f"Saved tuning was made with older line_config.py defaults: moved aside to "
+                             f"{os.path.basename(aside)}. Using the new defaults.", "tune")
+            return {}
+        out = self.apply(saved, quiet=True)
+        self.log("info", f"Loaded saved tuning ({os.path.basename(self.tuning_path)})", "tune")
+        return out
 
     def revert(self) -> dict:
         out = self.apply(self.defaults)

@@ -11,6 +11,8 @@
 #   ./car.sh stop       stop the drive program (the Pi stays on)
 #   ./car.sh ssh        a shell on the Pi
 #   ./car.sh find       only find the Pi and remember its IP
+#   ./car.sh check      no Pi needed: git state, SSH key, the exact bundle the car gets, and the tests
+#   ./car.sh pull       get the latest from GitHub (main), then ./car.sh check
 #
 # Ctrl-C only detaches this Mac: the drive program keeps running on the Pi.
 # The Pi is recognised by its SSH host key, never by IP, so a wrong machine is never used.
@@ -106,10 +108,8 @@ wait_dashboard() {
 
 start() {
   if running; then echo "== drive program already running"; return 0; fi
-  # A tuning.json saved by the version before pure pursuit (target 0.46, KP 4/4.5) would override every new
-  # default at start-up: keep a copy and start clean.
-  ssh_pi "$PI" 'f=~/linefollow/tuning.json; if [ -f "$f" ] && ! grep -q pure_pursuit "$f"; then
-      mv "$f" "$f.old-$(date +%Y%m%d-%H%M)"; echo "   old tuning.json (from before pure pursuit) moved aside"; fi'
+  # A tuning.json saved under older line_config.py defaults is set aside by the program itself at start-up
+  # (webui.Hub.load_saved checks the defaults fingerprint), so a git pull + deploy always takes effect.
   echo "== starting the drive program (it starts in User mode: nothing moves until you drive or pick Full Auto)"
   ssh_pi "$PI" "mkdir -p ~/linefollow/logs && cd ~/linefollow && \
       setsid nohup ~/env/bin/python -u drive_line.py $CAR_ARGS > ~/linefollow/logs/drive.log 2>&1 < /dev/null &"
@@ -133,7 +133,38 @@ attach() { # follow the program's output; reconnect whenever the link drops
   done
 }
 
+preflight() { # everything that can be checked without the car
+  local fail=0 quick="${1:-}"
+  echo "== git"
+  echo "   branch $(git branch --show-current), commit $(git log -1 --format='%h %s' | cut -c1-70)"
+  local dirty; dirty="$(git status --porcelain | wc -l | tr -d ' ')"
+  [ "$dirty" = 0 ] || echo "   NOTE: $dirty uncommitted change(s): they WILL be deployed (the car gets this folder, not GitHub)"
+  if git fetch -q origin main 2>/dev/null; then
+    local behind; behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+    if [ "$behind" != 0 ]; then echo "   GitHub main is $behind commit(s) ahead of this folder: ./car.sh pull"; else echo "   up to date with GitHub main"; fi
+  else
+    echo "   (could not reach GitHub; skipped the up-to-date check)"
+  fi
+  echo "== SSH key for the Pi"
+  if [ -f "$KEY" ]; then echo "   $KEY present"; else echo "   MISSING $KEY: copy it from the Mac that set up the car (see README)"; fail=1; fi
+  if ssh-keygen -F "$ALIAS" >/dev/null 2>&1; then echo "   Pi host key known (alias $ALIAS)"
+  else echo "   the Pi's host key isn't in ~/.ssh/known_hosts yet: run ./car.sh ssh once and accept it"; fi
+  echo "== the exact bundle the car gets"
+  ./deploy.sh --check || fail=1
+  if [ "$quick" != "--quick" ]; then
+    echo "== tests (about a minute; ./car.sh check --quick skips them)"
+    local out
+    if out="$(python3 -B -m unittest discover -s tests -q 2>&1)"; then echo "   $(echo "$out" | grep -E '^(Ran|OK)' | tr '\n' ' ')"
+    else echo "$out" | grep -E '^(FAIL|ERROR):' | head -20; echo "   TESTS FAILED"; fail=1; fi
+  fi
+  if [ "$fail" = 0 ]; then echo "== ready: ./car.sh   (finds the Pi, installs if needed, starts, opens the dashboard)"
+  else echo "== NOT ready: fix the items above first"; fi
+  return "$fail"
+}
+
 case "${1:-}" in
+  check)   preflight "${2:-}"; exit $? ;;
+  pull)    git pull --ff-only origin main && preflight --quick; exit $? ;;
   open)    need_pi; open_dash ;;
   log)     need_pi; attach ;;
   ssh)     need_pi; exec ssh -i "$KEY" -o IdentitiesOnly=yes -o HostKeyAlias="$ALIAS" "pi@$PI" ;;
@@ -146,5 +177,5 @@ case "${1:-}" in
            if running; then ssh_pi "$PI" 'pkill -INT -f "python.*[d]rive_line\.py"; sleep 2; pkill -f "python.*[d]rive_line\.py"; true'; sleep 1; fi
            deploy_if_needed; start; open_dash; attach ;;
   ""|[0-9]*) need_pi "${1:-}"; deploy_if_needed; start; open_dash; attach ;;
-  *) sed -n 2,14p "$0"; exit 1 ;;
+  *) sed -n 2,16p "$0"; exit 1 ;;
 esac
