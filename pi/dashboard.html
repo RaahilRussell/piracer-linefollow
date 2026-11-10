@@ -220,6 +220,8 @@ canvas.chart { width: 100%; height: 168px; display: block; }
 .bigknob .help { grid-column: 1 / -1; font-size: 12px; color: var(--secondary); }
 .bigknob .field { width: 84px; font-size: 15px; }
 .knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px 24px; }
+.lap-tune { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.lap-tune .lap-pid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px 20px; }
 .kgroup { display: grid; gap: 10px; align-content: start; }
 .knob { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 2px 8px; align-items: center; }
 .knob label { font-weight: 500; }
@@ -356,6 +358,7 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
     <div class="card">
       <div class="card-h"><h2>Camera</h2><div class="status-row" id="status"><span class="badge plain">Waiting for data…</span></div></div>
       <img class="video" id="video" alt="Camera with the tracked line drawn on it">
+      <p class="badge bad" id="videoStale" hidden>Camera frame stopped updating. Stop the car and check the camera connection.</p>
       <div class="lane">
         <canvas id="lane" role="img" aria-label="Lane gauge: waiting for data"></canvas>
         <div class="lane-cap"><span><i class="key" style="background:var(--tape-fill)"></i>tracked edge</span><span><i class="key" style="background:var(--target)"></i>target</span><span><i class="key" style="background:var(--ink)"></i>steering sent</span></div>
@@ -498,15 +501,15 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
       <div class="row"><span class="note" id="sectionTuneNote">Trial completion stops driving. Gamepad sticks take over Auto.</span><button class="btn" id="sectionFinish">End trial &amp; stop driving</button><button class="btn" id="sectionBothStart">Tune both automatically</button><button class="btn" id="sectionSave" disabled>Save section gains</button></div>
     </div>
     <div class="strats" id="atStrats" role="radiogroup" aria-label="Auto-tune strategy">
-      <label><input type="radio" name="strat" value="scheduled" checked><b>Schedule-guided ladder <span class="badge ok plain">Recommended</span></b><span class="note">Each speed starts from the simulator's KP/KD, then it's verified and corrected on the car. Climbs speed, then raises only the straights. Passes can be saved as car-verified profiles.</span></label>
-      <label><input type="radio" name="strat" value="ladder"><b>Speed ladder</b><span class="note">From your current KP/KD: fix gains until healthy, step speed up, then raise only the straights.</span></label>
+      <label><input type="radio" name="strat" value="ladder" checked><b>One-button tune · slow → medium → safe max</b><span class="note">Starts at the conservative crawl speed, checks short driving windows, then steps up only while tracking stays healthy. Stops at the car's current speed cap. This is a rolling 10-second check, not a guaranteed lap boundary; press Stop at any time.</span></label>
+      <label><input type="radio" name="strat" value="scheduled"><b>Schedule-guided ladder</b><span class="note">Starts from simulator gains for each speed, then verifies and corrects them on the car. The existing recorded-image review did not validate the simulator winner, so treat these as candidates.</span></label>
       <label><input type="radio" name="strat" value="gains"><b>Gains only</b><span class="note">Holds the test speed. Starts from the simulator's KP/KD for that speed and fixes weave, jitter and lag. Doesn't raise KP on its own: the car can't measure whether more KP really helps (it cuts corners).</span></label>
       <label><input type="radio" name="strat" value="max_speed"><b>Max speed</b><span class="note">Keeps your KP/KD and only climbs speed until it isn't healthy.</span></label>
       <label><input type="radio" name="strat" value="zn"><b>Ziegler–Nichols <span class="badge warn plain">Cross-check</span></b><span class="note">KD 0, raises KP until a steady weave (deliberately!), then KP = 0.8·Ku, KD = KP·Tu/8 and verifies. Needs about 0.8 throttle to weave; aborts if it loses the line. Have STOP ready.</span></label>
     </div>
-    <div class="row"><label for="atCeil">Never faster than</label><input class="field" type="number" id="atCeil" min="0.5" max="1" step="0.01" value="0.70"><span class="note" id="atCeilPwm"></span></div>
+    <div class="row"><label for="atCeil">Never faster than</label><input class="field" type="number" id="atCeil" min="0.5" max="0.60" step="0.01" value="0.60"><span class="note" id="atCeilPwm"></span></div>
     <div class="row" id="atSpeedRow"><label for="atSpeed">Test speed</label><input class="field" type="number" id="atSpeed" min="0.5" max="1" step="0.01" value="" placeholder="auto"><span class="note" id="atSpeedNote"></span></div>
-    <div class="row"><button class="btn primary" id="atStart">Start Auto-Tune</button><button class="btn" id="atStop">Stop</button><button class="btn" id="atKeep" disabled>Keep Result</button><button class="btn" id="atSave" disabled>Save as Car-Verified Profiles</button></div>
+    <div class="row"><button class="btn primary" id="atStart">Run the slow → medium → safe max tune</button><button class="btn" id="atStop">Stop now</button><button class="btn" id="atKeep" disabled>Keep Result</button><button class="btn" id="atSave" disabled>Save as Car-Verified Profiles</button></div>
     <p class="note" id="atMsg"></p>
     <table class="kv" id="atTable"></table>
   </div>
@@ -696,6 +699,12 @@ function onTele(items) {
 }
 function updateTiles(t) {
   if (!t) return;
+  const staleVideo = $('videoStale');
+  if (staleVideo) staleVideo.hidden = t.status !== 'STALE';
+  const lapStatus = $('lapRunStatus');
+  if (lapStatus) lapStatus.textContent = t.mode === 'local'
+    ? `Full Auto · ${fmt(t.speed_target ?? t.throttle)} throttle · ${t.status === 'TRACKING' ? 'tracking' : 'line lost'}`
+    : 'Stopped · Manual';
   const st = t.single_stop ? ['bad', 'Stopped: one line only'] : t.status === 'TRACKING' ? ['ok', t.source === 'right' ? 'Tracking (right-line backup)' : 'Tracking']
            : t.status === 'STALE' ? ['bad', 'Camera stale'] : ['warn', 'Line lost'];
   $('status').innerHTML = `<span class="badge ${st[0]}">${st[1]}</span>` + (t.web_driving ? ' <span class="badge warn">Web driving</span>' : '')
@@ -754,7 +763,7 @@ async function applyKnobs(vals, msg) {
 async function loadState() {
   const s = await api('/api/state'); knobState = s.knobs; speedProfiles = s.profiles;
   $('saveNote').textContent = (s.saved ? 'Saved tuning is active (tuning.json). ' : '') + 'Changes apply on the next frame. Save keeps them for the next start.';
-  renderKnobs(); syncBigKnobs(); renderTuneProfiles(); renderProfiles(speedProfiles, false, true);
+  renderKnobs(); syncBigKnobs(); wireDynamicKnobs(); syncLapSpeed(); renderTuneProfiles(); renderProfiles(speedProfiles, false, true);
 }
 function renderKnobs() {
   const groups = {}; knobState.forEach(k => (groups[k.group] ||= []).push(k));
@@ -779,13 +788,59 @@ function renderKnobs() {
   }
 }
 function wireKnob(k, rng, num, lbl, pwmEl) {
-  let tmr;
-  const send = (v) => { clearTimeout(tmr); tmr = setTimeout(async () => {
-    try { const r = await api('/api/knobs', { [k.id]: v }); for (const [id, value] of Object.entries(r.applied)) { const state = knobDef(id); if (state) state.value = value; } k.value = r.applied[k.id]; rng.value = num.value = k.value;
-          lbl.classList.toggle('changed', k.default != null && Math.abs(k.value - k.default) > 1e-9); syncBigKnobs(); schedulePreview(); }
-    catch (e) { toast('Not applied: ' + e.message); } }, 120); };
-  rng.addEventListener('input', () => { num.value = rng.value; if (pwmEl) pwmEl.textContent = pwmText(+rng.value); send(rng.value); });
-  num.addEventListener('change', () => { rng.value = num.value; send(num.value); });
+  if (rng.dataset.wired) return;
+  rng.dataset.wired = '1';
+  let timer, pending = null, flushing = false, revision = 0;
+  const send = (value) => {
+    pending = value;
+    const ownRevision = ++revision;
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      if (flushing || pending === null) return;
+      flushing = true;
+      const submitted = pending;
+      pending = null;
+      const submittedRevision = revision;
+      try {
+        const r = await api('/api/knobs', { [k.id]: submitted });
+        for (const [id, applied] of Object.entries(r.applied)) {
+          const state = knobDef(id);
+          if (state) state.value = applied;
+        }
+        const applied = r.applied[k.id];
+        if (submittedRevision === revision) {
+          k.value = applied;
+          rng.value = num.value = applied;
+          lbl.classList.toggle('changed', k.default != null && Math.abs(applied - k.default) > 1e-9);
+        }
+        syncBigKnobs(); schedulePreview();
+      } catch (e) { toast('Not applied: ' + e.message); }
+      finally {
+        flushing = false;
+        if (pending !== null) send(pending);
+      }
+    }, 120);
+    return ownRevision;
+  };
+  const update = () => {
+    num.value = rng.value;
+    if (pwmEl) pwmEl.textContent = pwmText(+rng.value);
+    send(rng.value);
+  };
+  rng.addEventListener('input', update);
+  num.addEventListener('input', update);
+  num.addEventListener('change', update);
+}
+function wireDynamicKnobs() {
+  for (const el of document.querySelectorAll('[data-knob-id]')) {
+    const id = el.dataset.knobId;
+    const range = $('bk_' + id), number = $('bkn_' + id), label = $('lbl_' + id), knob = knobDef(id);
+    if (!range || range.dataset.wired || !knob) continue;
+    range.dataset.wired = '1';
+    range.min = number.min = knob.min; range.max = number.max = knob.max; range.step = number.step = knob.step;
+    range.value = number.value = knob.value;
+    wireKnob(knob, range, number, label, null);
+  }
 }
 const BIG = ['kp', 'kd', 'target_x_ratio', 'lookahead_ratio', 'speed_straight', 'speed_corner', 'speed_transition', 'speed_ramp_down', 'speed_ramp_up', 'straight_kp', 'straight_kd', 'corner_kp', 'corner_kd', 'max_auto'];
 let bigWired = false;
@@ -1096,9 +1151,10 @@ document.querySelectorAll('input[name=strat]').forEach(r => r.onchange = stratUi
 setInterval(pollTuning, 1500);
 $('atCeil').oninput = () => { const lim = knobVal('max_auto'); $('atCeilPwm').textContent = '≈ PWM ' + pwmOf(+$('atCeil').value) + (lim != null && lim < +$('atCeil').value ? ` · Max: Full auto (${lim}) caps it lower` : ''); };
 $('atCeil').oninput();
-twoStep($('atStart'), 'Start Auto-Tune', async () => {
+//$('atStart') starts the selected tune directly; this remains an explicit action because it moves the car.
+$('atStart').onclick = async () => {
   const r = await api('/api/autotune', { action: 'start', strategy: strat(), ceiling: +$('atCeil').value, speed: $('atSpeedRow').hidden ? null : ($('atSpeed').value || null) });
-  toast(r.message); pollTuning(); });
+  toast(r.message); pollTuning(); };
 $('atStop').onclick = async () => { try { await api('/api/autotune', { action: 'stop' }); pollTuning(); } catch (e) { toast(e.message); } };
 $('atSave').onclick = async () => { try { await api('/api/autotune', { action: 'save_schedule' }); toast('Saved: speed profiles now use the car-verified gains'); pollTuning(); } catch (e) { toast(e.message); } };
 $('profRecompute').onclick = async () => { try { await api('/api/autotune', { action: 'recompute' }); toast('Recomputing the whole schedule (about a minute)'); } catch (e) { toast(e.message); } };
@@ -1283,13 +1339,29 @@ function organizeWorkbench() {
   checkDetails.append(diagnosis.firstElementChild);
 
   const sectionTune = drive.ownerDocument.querySelector('.section-tune');
-  controls.innerHTML = '<div class="card-h"><h2>Straight → curve → full lap</h2></div><p class="note">Start slow. Set each section’s speed and PD response, run its trial, then test both together. Settings apply live on the Pi. Changing speeds ends an active trial.</p>';
+  controls.innerHTML = '<div class="card-h"><h2>One full lap at a time</h2></div><p class="note">Start at the slow rolling baseline, complete one circle, stop at the start mark, then raise the speed slider and repeat. PID and speed changes apply live in Full Auto.</p>';
+  const lapCard = document.createElement('section'); lapCard.className = 'lap-tune card'; lapCard.innerHTML = `
+    <h3>1 · Set speed for the whole lap</h3>
+    <p class="note">Slow baseline is 0.55 throttle (about PWM 390). Wheel motion may stop below roughly 0.45–0.55. Slider changes straight, transition and curve speed together.</p>
+    <div class="bigknob"><label for="lapSpeed">Whole-lap speed <output id="lapSpeedReadout">0.55</output></label>
+      <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed value">
+      <input id="lapSpeed" type="range" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed">
+      <span class="help" id="lapSpeedStatus">Applied to all three Full Auto speed sections. Manual throttle is controlled by the gamepad or touchpad.</span></div>
+    <div class="lap-pid"></div>
+    <h3>2 · Run one circle, then stop</h3>
+    <p class="note">Put the car on the start mark with a clear circle ahead. Start only when the camera says TRACKING. Press stop yourself when it returns to the mark.</p>
+    <div class="row"><button class="btn primary" id="lapStart">Start slow full-circle lap</button><button class="btn danger" id="lapStop">Lap complete · stop</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
+  controls.append(lapCard);
+  lapCard.querySelector('.lap-pid').append($('bk_kp').closest('.bigknob'), $('bk_kd').closest('.bigknob'));
+  const sectionDetails = document.createElement('details'); sectionDetails.className = 'more';
+  sectionDetails.innerHTML = '<summary>Advanced: section tuning, simulator and recording analysis</summary>';
+  sectionDetails.append(sectionTune);
+  controls.append(sectionDetails);
   controls.querySelector('.card-h').append($('atState'));
-  controls.append(sectionTune);
   const cardStraight = $('sectionStraightCard'), cardCorner = $('sectionCornerCard');
   const moveKnob = (id, dest) => dest.append($('bk_' + id).closest('.bigknob'));
   const makeKnob = (id, label, help, max, step) => {
-    const el = document.createElement('div'); el.className = 'bigknob';
+    const el = document.createElement('div'); el.className = 'bigknob'; el.dataset.knobId = id;
     el.innerHTML = `<label for="bk_${id}" id="lbl_${id}">${label}</label><input class="field" id="bkn_${id}" type="number" min="0" max="${max}" step="${step}" aria-label="${label} value"><input id="bk_${id}" type="range" min="0" max="${max}" step="${step}"><span class="help">${help}</span>`;
     return el;
   };
@@ -1327,7 +1399,7 @@ function organizeWorkbench() {
   const limitKnob = makeKnob('max_auto', 'Full Auto speed ceiling', 'The overall motor limit also applies; see the effective speed limit beside the camera.', .8, .01);
   shared.append(limitKnob);
   for (const id of ['speed_transition', 'speed_ramp_down', 'speed_ramp_up']) moveKnob(id, shared);
-  controls.append(shared, $('atMsg'), $('saveNote'));
+  sectionDetails.append(shared, $('atMsg'), $('saveNote'), $('atTable'));
   const reviewPanel = document.createElement('details'); reviewPanel.className = 'more'; reviewPanel.id = 'reviewPanel';
   reviewPanel.innerHTML = '<summary>Recording analysis · download → replay → simulation → stress tests</summary><p class="note" id="reviewHint">Analysis runs on the Mac. Settings are never applied automatically.</p><div class="row"><label for="reviewHost">Pi IP</label><input class="field" id="reviewHost" placeholder="Enter current Pi IP" style="width:160px"><label><input type="checkbox" id="reviewDeep" checked> Include rendered camera & uncertainty tests</label><button class="btn" id="reviewCancel">Cancel analysis</button></div><progress id="reviewProgress" max="100" value="0" style="width:100%" aria-label="Recording analysis progress"></progress><p id="reviewStage" class="note">Ready</p><div id="reviewReport"></div><a class="btn" id="reviewDownload" hidden download="recording-review.json">Download report</a>';
   controls.append(reviewPanel);
@@ -1339,7 +1411,6 @@ function organizeWorkbench() {
   };
   $('reviewCancel').onclick = async () => { try { await api('/api/review', {action:'cancel'}); await pollReview(); } catch (e) { toast(e.message); } };
   $('sectionSave').hidden = true; // One persistent Save Tuning action at the top.
-  controls.append($('atTable'));
 
   const backup = drive.querySelector(':scope > .cols');
   const padCard = $('pad').closest('.card');
@@ -1359,6 +1430,69 @@ function organizeWorkbench() {
   advanced.append($('bk_target_x_ratio').closest('.bigknob'), $('bk_lookahead_ratio').closest('.bigknob'));
   drive.append(advanced);
   advanced.addEventListener('toggle', () => { if (advanced.open) { renderTuneProfiles(); schedulePreview(); } });
+}
+let lapSpeedTimer = null, lapSpeedWrites = Promise.resolve();
+function syncLapSpeed() {
+  const range = $('lapSpeed'), number = $('lapSpeedNumber');
+  if (!range || !number || document.activeElement === range || document.activeElement === number) return;
+  const cap = Math.min(knobVal('max_auto') ?? 0.6, knobVal('top_throttle') ?? 0.6, 0.8);
+  const current = [knobVal('speed_straight'), knobVal('speed_transition'), knobVal('speed_corner')]
+    .filter(v => v != null && +v > 0).map(Number);
+  const value = Math.min(cap, current.length ? Math.min(...current) : 0.55);
+  range.max = number.max = Math.max(0.45, cap).toFixed(2);
+  range.value = number.value = Math.min(Math.max(value, 0.45), +range.max).toFixed(2);
+  $('lapSpeedReadout').textContent = range.value;
+}
+function saveLapSpeed(value) {
+  const v = +value;
+  lapSpeedWrites = lapSpeedWrites.catch(() => {}).then(async () => {
+    const response = await api('/api/knobs', { speed_straight: v, speed_transition: v, speed_corner: v });
+    for (const [id, applied] of Object.entries(response.applied || {})) {
+      const state = knobDef(id); if (state) state.value = applied;
+    }
+    const range = $('lapSpeed'), number = $('lapSpeedNumber');
+    const actual = Math.min(...['speed_straight', 'speed_transition', 'speed_corner'].map(id => Number(response.applied[id] ?? v)));
+    range.value = number.value = actual.toFixed(2);
+    $('lapSpeedReadout').textContent = actual.toFixed(2);
+    $('lapSpeedStatus').textContent = lastTele?.mode === 'local'
+      ? `Full Auto speed updated live to ${actual.toFixed(2)}.`
+      : `Set to ${actual.toFixed(2)} for Full Auto. It will not change Manual joystick speed.`;
+    syncBigKnobs();
+    return actual;
+  });
+  return lapSpeedWrites;
+}
+function wireLapControls() {
+  const range = $('lapSpeed'), number = $('lapSpeedNumber');
+  const changed = event => {
+    const value = Math.min(+range.max, Math.max(+range.min, +event.currentTarget.value || 0.55));
+    range.value = number.value = value.toFixed(2);
+    $('lapSpeedReadout').textContent = value.toFixed(2);
+    clearTimeout(lapSpeedTimer);
+    lapSpeedTimer = setTimeout(() => saveLapSpeed(value).catch(e => toast('Speed not applied: ' + e.message)), 140);
+  };
+  range.addEventListener('input', changed);
+  number.addEventListener('input', changed);
+  $('lapStart').onclick = async () => {
+    const speed = +range.value, cap = Math.min(knobVal('max_auto') ?? 0.6, knobVal('top_throttle') ?? 0.6);
+    if (!src.live || !src.fresh) return toast('Car is disconnected or telemetry is stale.');
+    if (lastTele?.status !== 'TRACKING' || !lastTele?.found) return toast('Line is not being tracked. Fix the camera view before starting a lap.');
+    if (speed < 0.45 || speed > cap + 1e-6) return toast(`Choose a rolling speed at or below the current Full Auto limit (${cap.toFixed(2)}).`);
+    const button = $('lapStart'); button.disabled = true;
+    try {
+      clearTimeout(lapSpeedTimer);
+      await saveLapSpeed(speed);
+      $('lapRunStatus').textContent = `Starting one lap at ${speed.toFixed(2)}…`;
+      await api('/api/mode', { mode: 'local' });
+      toast(`Full Auto lap started at ${speed.toFixed(2)}. Press “Lap complete · stop” at the start mark.`);
+    } catch (e) { $('lapRunStatus').textContent = 'Stopped'; toast('Could not start lap: ' + e.message); }
+    finally { button.disabled = false; }
+  };
+  $('lapStop').onclick = async () => {
+    try { await api('/api/estop', {}); $('lapRunStatus').textContent = 'Stopped · Manual'; toast('Lap ended. Car stopped.'); }
+    catch (e) { toast('Stop request failed: ' + e.message); }
+  };
+  syncLapSpeed();
 }
 let reviewReportUrl = null, lastReviewReport = null;
 async function pollReview() {
@@ -1392,6 +1526,7 @@ async function pollReview() {
 }
 (async () => {
   organizeWorkbench();
+  wireLapControls();
   pollReview(); setInterval(pollReview, 2000);
   await pollStatus();
   route(); connect(); startVideo(); pollLog(); pollTuning(); pollDiagnose();

@@ -8,6 +8,7 @@ default from linetrack/config.py, which was tuned on real stage frames.
 
 # --- What to follow ---------------------------------------------------------
 TARGET_X_RATIO = 0.40      # left orange line's inside edge sits left-of-center; 0.80 = other side
+# Camera orientation is already set by ~/mycar's CAMERA_HFLIP / CAMERA_VFLIP; do not flip frames again here.
 LOOKAHEAD_RATIO = 0.62     # row (fraction of image height) where the error is measured
 
 # --- Orange detection -----------------------------------------------------------
@@ -92,9 +93,9 @@ SINGLE_LINE_STOP_S = 2.5
 # Curvature drives the handoff: straight -> transition -> corner. The plan slews throttle
 # down/up so a bend is entered progressively and the car only accelerates after curvature clears.
 # The auto-tuner fills straight/corner; transition defaults to their midpoint.
-SPEED_STRAIGHT = 0.0
-SPEED_TRANSITION = 0.0   # 0 = midpoint; used while curvature is building before the full corner
-SPEED_CORNER = 0.0
+SPEED_STRAIGHT = 0.55   # conservative first-pass throttle command; increase only after passes
+SPEED_TRANSITION = 0.55 # neutral handoff for the first passes
+SPEED_CORNER = 0.55     # begin at crawl pace; lower only after confirming it still rolls
 SPEED_RAMP_DOWN = 1.0    # throttle units / s when entering a bend
 SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend
 
