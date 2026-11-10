@@ -4,11 +4,14 @@ from __future__ import annotations
 import math
 
 
-def assess_lap(samples, speed, *, step=0.03, minimum_samples=40):
+def assess_lap(samples, speed, *, step=0.05, minimum_samples=40):
     """Assess recorded telemetry; steering saturation alone never defines failure."""
     speed = float(speed)
     if not math.isfinite(speed) or not 0 <= speed <= 1:
         raise ValueError("speed must be between 0 and 1")
+    step = float(step)
+    if not math.isfinite(step) or not 0.01 <= step <= 0.12:
+        raise ValueError("speed step must be between 0.01 and 0.12")
     clean = [s for s in (samples or []) if isinstance(s, dict)]
     if len(clean) < minimum_samples:
         return {"result": "inconclusive", "samples": len(clean), "speed": speed,

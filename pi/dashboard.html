@@ -82,6 +82,7 @@ p { margin: 0; }
 .btn:disabled { opacity: .45; cursor: default; }
 .btn.primary { background: var(--ink); color: var(--card); }
 .btn.arm { background: var(--warn); color: var(--card); }
+.btn.danger { background: color-mix(in srgb, var(--bad) 12%, var(--card)); color: var(--bad); }
 .btn.small { min-height: 24px; padding: 0 8px; font-size: 12px; }
 .stop { min-height: var(--ctl); min-width: 96px; padding: 0 18px; border: 0; border-radius: 8px; background: var(--stop-bg); color: var(--stop-fg);
   font-weight: 700; letter-spacing: .04em; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
@@ -223,6 +224,10 @@ canvas.chart { width: 100%; height: 168px; display: block; }
 .lap-tune { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .lap-tune .lap-pid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px 20px; }
 .lap-page-intro { margin-bottom: 14px; }
+.lap-step-control { margin-top: 10px; padding: 10px 12px; border-radius: 9px; background: var(--surface); display:grid; gap:5px; }
+.lap-step-control label { font-weight:600; }
+.lap-step-control output { font-family:var(--mono); color:var(--target); }
+.lap-step-control input[type=range] { width:100%; accent-color:var(--tape); min-height:24px; }
 .lap-workflow-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%, 420px),1fr)); gap:14px; align-items:start; }
 .lap-workflow-grid > .card { margin:0; min-width:0; }
 .both-tuner { display:grid; gap:12px; align-content:start; }
@@ -1143,10 +1148,14 @@ async function pollTuning() {
 }
 function renderSectionTune(a) {
   if (!a) return;
+  for (const [id, value] of [['speed_straight', a.straight], ['speed_corner', a.corner], ['speed_transition', a.transition]]) {
+    const k = knobDef(id); if (k && value != null) k.value = value;
+  }
   for (const id of ['straight_kp', 'straight_kd', 'corner_kp', 'corner_kd']) {
     const k = knobDef(id); if (k && a[id] != null) k.value = a[id];
   }
   syncBigKnobs();
+  syncLapSpeed();
   const set = (name, kp, kd) => { $('section' + name + 'Gains').textContent = `KP ${fmt(kp, 2)} · KD ${fmt(kd, 2)}`; };
   set('Straight', a.straight_kp, a.straight_kd); set('Corner', a.corner_kp, a.corner_kd);
   const active = a.section;
@@ -1162,6 +1171,8 @@ function renderSectionTune(a) {
     badge.className = 'badge ' + (isActive ? 'warn' : done && shown === 'passed' ? 'ok' : 'plain');
   }
   $('sectionSave').disabled = !(a.state === 'done' && active && a.result === 'passed');
+  const stepFail = $('sectionStepFail');
+  if (stepFail) stepFail.disabled = !(a.state === 'running' && a.strategy === 'sections');
   $('sectionTuneNote').textContent = a.section ? (a.message || `Selected section: ${a.section}`) : 'Place the car first, then tune one section at a time.';
 }
 const strat = () => document.querySelector('input[name=strat]:checked').value;
@@ -1199,7 +1210,8 @@ $('sectionStraightReset').onclick = sectionAction('straight', 'section_reset');
 $('sectionCornerReset').onclick = sectionAction('corner', 'section_reset');
 $('sectionFinish').onclick = async () => { try { await api('/api/autotune', { action: 'section_finish' }); pollTuning(); } catch (e) { toast(e.message); } };
 twoStep($('sectionBothStart'), 'Tune both automatically', async () => {
-  const r = await api('/api/autotune', { action: 'sections_start', ceiling: +$('atCeil').value, speed: currentSpeed() });
+  const r = await api('/api/autotune', { action: 'sections_start', ceiling: +$('atCeil').value,
+    speed: currentSpeed(), step: +$('tuneSpeedStep').value });
   toast(r.message || 'Guided section tuning started'); pollTuning();
 });
 $('sectionSave').onclick = async () => { try { await api('/api/save', {}); toast('Saved straight and corner gains'); pollTuning(); } catch (e) { toast(e.message); } };
@@ -1365,9 +1377,9 @@ function organizeWorkbench() {
   const sectionTune = drive.ownerDocument.querySelector('.section-tune');
   controls.innerHTML = '<div class="card-h"><h2>Drive tools</h2></div><p class="note">Use the Lap tuner section for guided speed steps and separate straight/curve tuning. The camera, controls and emergency STOP stay here.</p>';
   const lapCard = document.createElement('section'); lapCard.className = 'lap-tune card'; lapCard.innerHTML = `
-    <h3>1 · Set speed and target</h3>
-    <p class="note">Slow baseline is 0.55 throttle (about PWM 390). Wheel motion may stop below roughly 0.45–0.55. Slider changes straight, transition and curve speed together.</p>
-    <div class="bigknob"><label for="lapSpeed">Whole-lap speed <output id="lapSpeedReadout">0.55</output></label>
+    <h3>1 · Set throttle and target</h3>
+    <p class="note">Slow baseline is 0.55 throttle (about PWM 390). This sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
+    <div class="bigknob"><label for="lapSpeed">Whole-lap throttle <output id="lapSpeedReadout">0.55</output></label>
       <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed value">
       <input id="lapSpeed" type="range" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed">
       <span class="help" id="lapSpeedStatus">Applied to all three Full Auto speed sections. Manual throttle is controlled by the gamepad or touchpad.</span></div>
@@ -1378,13 +1390,16 @@ function organizeWorkbench() {
     <p class="note">Place the car at your chosen start mark with a clear circle ahead. Start only when the camera says TRACKING. Press finish when it returns to that mark; the dashboard cannot reliably identify a lap boundary from camera frames alone.</p>
     <div class="row"><button class="btn primary" id="lapStart">Start slow full-circle lap</button><button class="btn danger" id="lapStop">Finish lap · stop & review</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
   const lapIntro = document.createElement('div'); lapIntro.className = 'card lap-page-intro';
-  lapIntro.innerHTML = '<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Choose one of two focused workflows. Both use Full Auto and stop the car when the trial ends.</p></div><a class="btn" href="#drive">Open live camera &amp; controls</a></div>';
+  lapIntro.innerHTML = `<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Set straight and curve throttle separately, then let Tune both raise them after clean passes. STOP remains available in the header.</p></div><a class="btn" href="#drive">Open live camera &amp; controls</a></div>
+    <div class="lap-step-control"><label for="tuneSpeedStep">Throttle increase after each clean step <output id="tuneSpeedStepReadout">0.05</output></label>
+      <input id="tuneSpeedStep" type="range" min="0.01" max="0.12" step="0.01" value="0.05" aria-label="Throttle increase after each clean step">
+      <p class="note">Used by both workflows. Each passed step raises straight, transition and curve throttle by this amount. Make bigger jumps for speed, or smaller jumps near the limit.</p></div>`;
   const lapSteps = document.createElement('div'); lapSteps.className = 'lap-workflow-grid';
   lapSteps.append(lapCard);
   laptune.append(lapIntro, lapSteps);
   lapCard.querySelector('.lap-pid').append($('bk_kp').closest('.bigknob'), $('bk_kd').closest('.bigknob'));
   const sectionDetails = document.createElement('section'); sectionDetails.className = 'card both-tuner';
-  sectionDetails.innerHTML = '<div class="card-h"><div><h2>Tune straight + curve automatically</h2><p class="note">This tunes the two steering sections at the current speed. It does not climb the speed ladder.</p></div></div><ol class="tuner-steps"><li>Start in <b>Full Auto</b> and place the car on the track.</li><li>Press <b>Tune both automatically</b> and confirm. Let it observe at least two straight/curve transitions.</li><li>It evaluates each section, adjusts KP/KD when the health checks call for it, and stops when both pass or tracking fails.</li><li>Review the section results, then choose <b>Save section gains</b> to keep them.</li></ol><p class="note tuner-warning">The car moves during this trial. Keep the track clear and STOP if its path looks unsafe. Near-limit steering is acceptable while it keeps the line tracked.</p>';
+  sectionDetails.innerHTML = '<div class="card-h"><div><h2>Tune straight + curve automatically</h2><p class="note">Learns separate steering gains and raises real throttle for faster laps.</p></div></div><ol class="tuner-steps"><li>Set <b>Straight throttle</b> and <b>Curve throttle</b> below. Raise curve throttle if it bogs down there.</li><li>Start in <b>Full Auto</b>, place the car on the track, then press <b>Tune both automatically</b> and confirm.</li><li>It checks both sections. When both pass, it raises each throttle target by the selected step and checks again, up to the Full Auto cap.</li><li>If a step is too slow (motor bogging) or too fast, press <b>Step failed · stop &amp; keep last good</b>. It stops and returns to the last passing throttle and gains. Then raise the relevant throttle if it was bogging, or lower it if it was too fast.</li></ol><p class="note tuner-warning">The car moves during this trial. Keep the track clear and STOP if its path looks unsafe. Near-limit steering is acceptable while it keeps the line tracked.</p>';
   sectionDetails.append($('atState'), sectionTune);
   const autoTuneDetails = document.createElement('details'); autoTuneDetails.className = 'more';
   autoTuneDetails.innerHTML = '<summary>Results and speed limits</summary>';
@@ -1401,20 +1416,24 @@ function organizeWorkbench() {
     return el;
   };
   for (const [name, card] of [['straight', cardStraight], ['corner', cardCorner]]) {
+    $('lbl_' + (name === 'straight' ? 'speed_straight' : 'speed_corner')).textContent = name === 'straight' ? 'Straight throttle' : 'Curve throttle';
     card.querySelector('h4').textContent = name === 'straight' ? 'Straight' : 'Curve';
     card.querySelector('.section-help').textContent = name === 'straight' ? 'Recover toward the line without weaving. Stops at a confirmed curve.' : 'Hold the curve at a lower speed, with corrections. Stops at a confirmed straight.';
     const buttons = card.querySelector('.row');
     moveKnob(name === 'straight' ? 'speed_straight' : 'speed_corner', card);
     const presets = document.createElement('div'); presets.className = 'row';
-    for (const [label, fast] of [['Slow test', false], ['Faster +0.03', true]]) {
+    for (const [label, direction] of [['Slow baseline', 'base'], ['Slower −step', 'down'], ['Faster +step', 'up']]) {
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = label;
       b.onclick = () => {
         const id = name === 'straight' ? 'speed_straight' : 'speed_corner';
         const limit = Math.min(knobVal('max_auto') ?? .6, knobVal('top_throttle') ?? .6);
-        const speed = Math.min(limit, fast ? (knobVal(id) || .55) + .03 : .55);
+        const step = +$('tuneSpeedStep').value;
+        const current = Number(knobVal(id) || .55);
+        const speed = direction === 'base' ? Math.min(limit, .55)
+          : Math.max(.45, Math.min(limit, +(current + (direction === 'up' ? step : -step)).toFixed(2)));
         const values = { [id]: speed };
         if (name === 'corner' && !(knobVal('speed_straight') > 0)) values.speed_straight = speed;
-        applyKnobs(values, `${name} speed ${speed.toFixed(2)} prepared`);
+        applyKnobs(values, `${name} throttle set to ${speed.toFixed(2)}`);
       }; presets.append(b);
     }
     card.append(presets);
@@ -1443,6 +1462,16 @@ function organizeWorkbench() {
   };
   $('reviewCancel').onclick = async () => { try { await api('/api/review', {action:'cancel'}); await pollReview(); } catch (e) { toast(e.message); } };
   $('sectionSave').hidden = false;
+  const stepFail = document.createElement('button');
+  stepFail.type = 'button'; stepFail.id = 'sectionStepFail'; stepFail.className = 'btn danger';
+  stepFail.textContent = 'Step failed · stop & keep last good'; stepFail.disabled = true;
+  stepFail.title = 'Stops Tune both and restores the last passing straight/curve throttle and gains.';
+  $('sectionTuneNote').parentElement.insertBefore(stepFail, $('sectionBothStart'));
+  stepFail.onclick = async () => {
+    stepFail.disabled = true;
+    try { const r = await api('/api/autotune', {action:'sections_fail'}); toast(r.message || 'Stopped at the last passing throttle'); pollTuning(); }
+    catch (e) { toast(e.message); pollTuning(); }
+  };
 
   const backup = drive.querySelector(':scope > .cols');
   const padCard = $('pad').closest('.card');
@@ -1496,6 +1525,8 @@ function saveLapSpeed(value) {
 }
 function wireLapControls() {
   const range = $('lapSpeed'), number = $('lapSpeedNumber');
+  const stepRange = $('tuneSpeedStep'), stepReadout = $('tuneSpeedStepReadout');
+  stepRange.addEventListener('input', () => { stepReadout.textContent = (+stepRange.value).toFixed(2); });
   const changed = event => {
     const value = Math.min(+range.max, Math.max(+range.min, +event.currentTarget.value || 0.55));
     range.value = number.value = value.toFixed(2);
@@ -1531,7 +1562,7 @@ function wireLapControls() {
     const samples = lapTune.samples.slice(), speed = lapTune.speed;
     try {
       await api('/api/estop', {}); lapTune.active = false;
-      const review = await api('/api/lap-review', { samples, speed }); lapTune.report = review;
+      const review = await api('/api/lap-review', { samples, speed, step: +stepRange.value }); lapTune.report = review;
       let reportText = `Lap ${lapTune.run}: ${review.result.toUpperCase()} · ${review.samples} samples · tracking ${review.tracking_pct == null ? '—' : review.tracking_pct + '%'} · p90 line error ${review.error_p90 == null ? '—' : review.error_p90} · steering near limit ${review.steering_limit_pct == null ? '—' : review.steering_limit_pct + '%'} (not a failure by itself). ${review.message}`;
       if (review.result === 'passed') lapTune.safeSpeed = speed;
       if (review.result !== 'inconclusive' && review.result !== 'failed' && review.next_speed > speed) {

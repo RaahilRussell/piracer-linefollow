@@ -24,7 +24,11 @@ class TestLapAssessment(unittest.TestCase):
     def test_clean_lap_stages_small_speed_increase(self):
         r = lap_tuning.assess_lap(frames(100), 0.55)
         self.assertEqual(r["result"], "passed")
-        self.assertEqual(r["next_speed"], 0.58)
+        self.assertEqual(r["next_speed"], 0.60)
+
+    def test_user_selected_step_changes_the_increase(self):
+        r = lap_tuning.assess_lap(frames(100), 0.55, step=0.10)
+        self.assertEqual(r["next_speed"], 0.65)
 
     def test_lost_line_stops_speed_ladder(self):
         r = lap_tuning.assess_lap(frames(100, tracking=False), 0.58)
@@ -56,14 +60,20 @@ class TestLapAssessment(unittest.TestCase):
             with self.assertRaises(ValueError):
                 lap_tuning.assess_lap(frames(40), value)
 
+    def test_invalid_step_rejected(self):
+        for value in (0, 0.13, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                lap_tuning.assess_lap(frames(40), 0.55, step=value)
+
     @given(
         speed=st.floats(min_value=0, max_value=1, allow_nan=False, allow_infinity=False),
         n=st.integers(min_value=40, max_value=300),
         error=st.floats(min_value=0, max_value=0.12, allow_nan=False, allow_infinity=False),
         steering=st.floats(min_value=-1, max_value=1, allow_nan=False, allow_infinity=False),
+        step=st.floats(min_value=0.01, max_value=0.12, allow_nan=False, allow_infinity=False),
     )
-    def test_property_clean_tracking_never_fails_due_to_steering(self, speed, n, error, steering):
-        result = lap_tuning.assess_lap(frames(n, error=error, steering=steering), speed)
+    def test_property_clean_tracking_never_fails_due_to_steering(self, speed, n, error, steering, step):
+        result = lap_tuning.assess_lap(frames(n, error=error, steering=steering), speed, step=step)
         self.assertIn(result["result"], ("passed", "repeat"))
         self.assertGreaterEqual(result["next_speed"], speed)
         self.assertLessEqual(result["next_speed"], 1.0)

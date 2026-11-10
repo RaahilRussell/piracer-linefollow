@@ -161,8 +161,8 @@ class AutoTuner:
         skp, skd = self._get_active_gains()
         self._say("info", f"Section tune ready: {section} at {current:.2f}; place the car, then watch the next {self.window_s:.0f} s")
 
-    def begin_sections(self, speed=None):
-        """Collect straight and corner samples from one continuous Full Auto run."""
+    def begin_sections(self, speed=None, step=None):
+        """Tune both sections and raise their throttle after each clean pair of passes."""
         from donkey_part import SpeedPlan
         if self.state == "running":
             raise RuntimeError("Stop the current auto-tune first")
@@ -176,16 +176,23 @@ class AutoTuner:
         self.state, self.history, self.best, self.best_uniform, self.verified = "running", [], None, None, []
         self.phase = "collecting"
         self._retunes = 0
+        self._sections_step = min(0.12, max(0.01, float(self.step if step is None else step)))
+        self._sections_safe = None
         import copy
         plan = self._saved[6]
         self.pilot.speed_plan = copy.deepcopy(plan) if plan is not None else SpeedPlan(current, current)
         self.pilot.speed_plan.straight = min(self.pilot.speed_plan.straight, self.ceiling)
-        self.pilot.speed_plan.corner = min(self.pilot.speed_plan.corner, self.ceiling)
-        self.pilot.speed_plan.transition = min(self.pilot.speed_plan.transition, self.ceiling)
+        self.pilot.speed_plan.corner = min(self.pilot.speed_plan.corner, self.pilot.speed_plan.straight,
+                                           self.ceiling)
+        self.pilot.speed_plan.transition = min(self.pilot.speed_plan.straight,
+                                               max(self.pilot.speed_plan.corner,
+                                                   min(self.pilot.speed_plan.transition, self.ceiling)))
         c.max_throttle = max(c.max_throttle, self.ceiling)
         self._reset_window()
         self._guided_begin()
-        self._say("info", f"Guided tune ready at {current:.2f}; it will learn each section and stop after both pass")
+        self._say("info", f"Tune both ready: straight {self.pilot.speed_plan.straight:.2f}, "
+                          f"curve {self.pilot.speed_plan.corner:.2f}; raises both by {self._sections_step:.2f} "
+                          f"after both pass, up to {self.ceiling:.2f}")
 
     def _guided_begin(self):
         self.pilot.resume_motion()
@@ -200,11 +207,64 @@ class AutoTuner:
 
     def _guided_end(self, result, message):
         if result != "passed":
-            self._restore()
-            self.best = None
+            if self.strategy == "sections" and getattr(self, "_sections_safe", None) is not None:
+                attempted = self.pilot.speed_plan
+                attempted_s, attempted_c = attempted.straight, attempted.corner
+                self._restore_sections_safe()
+                safe = self.pilot.speed_plan
+                result = "passed"
+                message = (f"{message}; speed step failed at straight {attempted_s:.2f} / curve "
+                           f"{attempted_c:.2f}. Kept last passing throttle: straight "
+                           f"{safe.straight:.2f} / curve {safe.corner:.2f}")
+            else:
+                self._restore()
+                self.best = None
         self.result, self.state = result, "done"
         self.pilot.stop_motion()
         self._say("info" if result == "passed" else "warn", message + "; driving stopped")
+
+    def _save_sections_safe(self):
+        import copy
+        c = self.pilot.cfg
+        self._sections_safe = (c.kp, c.kd, c.straight_kp, c.straight_kd, c.corner_kp, c.corner_kd,
+                               copy.deepcopy(self.pilot.speed_plan), c.max_throttle, self.best)
+        self._section_results = {"straight": "passed", "corner": "passed"}
+
+    def _restore_sections_safe(self):
+        c = self.pilot.cfg
+        (c.kp, c.kd, c.straight_kp, c.straight_kd, c.corner_kp, c.corner_kd,
+         self.pilot.speed_plan, c.max_throttle, self.best) = self._sections_safe
+        self._section_results = {"straight": "passed", "corner": "passed"}
+
+    def _advance_sections_speed(self):
+        from donkey_part import SpeedPlan
+        plan = self.pilot.speed_plan
+        self._save_sections_safe()
+        straight = min(self.ceiling, round(plan.straight + self._sections_step, 2))
+        corner = min(straight, self.ceiling, round(plan.corner + self._sections_step, 2))
+        transition = min(straight, max(corner, round(plan.transition + self._sections_step, 2)))
+        if straight <= plan.straight + 1e-9 and corner <= plan.corner + 1e-9:
+            return self._guided_end("passed", f"Both sections passed at the speed ceiling "
+                                    f"(straight {plan.straight:.2f} / curve {plan.corner:.2f})")
+        self.pilot.speed_plan = SpeedPlan(straight, corner, transition=transition,
+                                          full_at=plan.full_at, ramp_down=plan.ramp_down,
+                                          ramp_up=plan.ramp_up)
+        self.phase = f"{straight:.2f}/{corner:.2f}"
+        self._section_results = {"straight": "pending", "corner": "pending"}
+        self._evidence = {"straight": 0, "corner": 0}
+        self._attempts = {"straight": 0, "corner": 0}
+        self._transitions = 0
+        self.pilot.ctrl.reset()
+        self.pilot.speed_plan.reset()
+        self._say("info", f"Both sections passed; increasing throttle to straight {straight:.2f} / "
+                          f"curve {corner:.2f} (step +{self._sections_step:.2f})")
+        self._reset_window()
+
+    def fail_sections(self):
+        """Let the driver flag a slow/stalled step and stop at the last passed throttle."""
+        if self.state != "running" or self.strategy != "sections":
+            raise RuntimeError("Start Tune both automatically before marking a speed step failed")
+        return self._guided_end("failed", "Driver marked this throttle step failed")
 
     def finish_section(self):
         if self.state != "running" or self.strategy not in ("section", "sections"):
@@ -261,7 +321,10 @@ class AutoTuner:
             self.best = lv
         needed = ("straight", "corner") if self.strategy == "sections" else (self.section,)
         if all(self._section_results[s] == "passed" for s in needed) and (self.strategy != "sections" or self._transitions >= 2):
-            self._guided_end("passed", "Selected sections passed tracking checks at these speeds")
+            if self.strategy == "sections":
+                self._advance_sections_speed()
+            else:
+                self._guided_end("passed", "Selected section passed tracking checks")
 
     def _guided_update(self, cmd, tracking, section, now):
         if now - self._guided_started > 600:
@@ -301,7 +364,10 @@ class AutoTuner:
     def abort(self, why="stopped"):
         if self.state != "running":
             return
-        self._restore()
+        if self.strategy == "sections" and getattr(self, "_sections_safe", None) is not None:
+            self._restore_sections_safe()
+        else:
+            self._restore()
         self.state = "aborted"
         self.result = "stopped"
         self.pilot.stop_motion()
@@ -570,9 +636,11 @@ class AutoTuner:
         return {"state": self.state, "strategy": self.strategy, "section": self.section, "strategies": STRATEGIES, "phase": self.phase,
                 "result": self.result, "section_results": getattr(self, "_section_results", {}),
                 "transitions_observed": getattr(self, "_transitions", 0),
+                "speed_step": getattr(self, "_sections_step", self.step),
                 "message": self.message, "has_schedule": bool(self.schedule),
                 "straight": None if plan is None else round(plan.straight, 3),
                 "corner": None if plan is None else round(plan.corner, 3),
+                "transition": None if plan is None else round(plan.transition, 3),
                 "kp": round(self.pilot.cfg.kp, 3), "kd": round(self.pilot.cfg.kd, 3),
                 "straight_kp": round(skp, 3), "straight_kd": round(skd, 3),
                 "corner_kp": round(ckp, 3), "corner_kd": round(ckd, 3),

@@ -44,18 +44,49 @@ class GuidedTrials(unittest.TestCase):
         self.assertEqual(self.at.result, "insufficient")
         self.assertTrue(self.pilot.motion_stopped)
 
-    def test_both_preserves_plan_and_accepts_separate_segments(self):
-        self.at.begin_sections()
-        self.assertEqual((self.pilot.speed_plan.straight, self.pilot.speed_plan.corner,
-                          self.pilot.speed_plan.transition), (.75, .55, .61))
+    def _pass_both_sections(self):
         self.samples("straight")
         self.samples("corner")
         self.samples("straight", 1)
+
+    def test_both_preserves_plan_and_climbs_throttle_after_both_pass(self):
+        self.at.begin_sections(step=.05)
+        self.assertEqual((self.pilot.speed_plan.straight, self.pilot.speed_plan.corner,
+                          self.pilot.speed_plan.transition), (.75, .55, .61))
+        self._pass_both_sections()
+        self.assertEqual(self.at.state, "running")
+        self.assertEqual((self.pilot.speed_plan.straight, self.pilot.speed_plan.corner), (.8, .6))
+        self.assertEqual(self.at._section_results, {"straight": "pending", "corner": "pending"})
+        for expected_corner in (.65, .7, .75, .8):
+            self._pass_both_sections()
+            self.assertEqual(self.at.state, "running")
+            self.assertAlmostEqual(self.pilot.speed_plan.straight, .8)
+            self.assertAlmostEqual(self.pilot.speed_plan.corner, expected_corner)
+        self._pass_both_sections()
         self.assertEqual(self.at.result, "passed")
         self.assertTrue(self.pilot.motion_stopped)
         shared = (self.pilot.cfg.kp, self.pilot.cfg.kd)
         self.at.apply_best()
         self.assertEqual(shared, (self.pilot.cfg.kp, self.pilot.cfg.kd))
+
+    def test_step_failed_button_keeps_last_proven_throttle_and_stops(self):
+        self.at.begin_sections(step=.05)
+        self._pass_both_sections()
+        self.assertEqual((self.pilot.speed_plan.straight, self.pilot.speed_plan.corner), (.8, .6))
+        self.at.fail_sections()
+        self.assertEqual(self.at.result, "passed")
+        self.assertTrue(self.pilot.motion_stopped)
+        self.assertEqual((self.pilot.speed_plan.straight, self.pilot.speed_plan.corner), (.75, .55))
+        self.assertIn("Driver marked this throttle step failed", self.at.message)
+
+    def test_tracking_failure_after_a_pass_restores_last_safe_throttle(self):
+        self.at.begin_sections(step=.05)
+        self._pass_both_sections()
+        self.at.update("local", self.cmd, False, "unknown")
+        self.assertEqual(self.at.result, "passed")
+        self.assertTrue(self.pilot.motion_stopped)
+        self.assertEqual((self.pilot.speed_plan.straight, self.pilot.speed_plan.corner), (.75, .55))
+        self.assertIn("speed step failed", self.at.message)
 
     def test_sparse_data_cannot_pass(self):
         self.at.begin_sections()

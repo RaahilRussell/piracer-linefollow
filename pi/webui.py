@@ -422,7 +422,7 @@ class Hub:
             return advisor.recommend(cmd, over)
         raise ValueError(f"unknown simulator action {action!r}")
 
-    def autotune(self, action, ceiling=None, strategy=None, speed=None):
+    def autotune(self, action, ceiling=None, strategy=None, speed=None, step=None):
         at = self.autotuner
         if action == "recompute":
             return self.recompute_schedule()
@@ -447,7 +447,9 @@ class Hub:
             lim = self.cap.limit("local") if self.cap is not None else 1.0
             at.ceiling = min(float(ceiling) if ceiling else lim, lim)
             at.schedule = self.schedule_points()
-            at.begin_sections(speed=None if speed in (None, "") else min(float(speed), at.ceiling))
+            at.begin_sections(speed=None if speed in (None, "") else min(float(speed), at.ceiling), step=step)
+        elif action == "sections_fail":
+            at.fail_sections()
         elif action == "section_reset":
             at.reset_section(strategy)
         elif action == "section_finish":
@@ -1082,7 +1084,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(hub.review_action(body))
             if p == "/api/lap-review":
                 import lap_tuning
-                return self._json(lap_tuning.assess_lap(body.get("samples"), body.get("speed")))
+                return self._json(lap_tuning.assess_lap(body.get("samples"), body.get("speed"),
+                                                       step=body.get("step", 0.05)))
             if p == "/api/knobs":
                 return self._json({"applied": hub.apply(body)})
             if p == "/api/save":
@@ -1107,7 +1110,8 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/profile":
                 return self._json({"applied": hub.apply_profile(body.get("name"))})
             if p == "/api/autotune":
-                return self._json(hub.autotune(body.get("action"), body.get("ceiling"), body.get("strategy"), body.get("speed")))
+                return self._json(hub.autotune(body.get("action"), body.get("ceiling"), body.get("strategy"),
+                                               body.get("speed"), body.get("step")))
             if p == "/api/poweroff":
                 hub.poweroff()
                 return self._json({"ok": True})
