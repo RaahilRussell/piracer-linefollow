@@ -253,6 +253,32 @@ def pursuit_goal(ground: np.ndarray, lateral: float, lookahead: float, min_pts: 
     return float(p[0]), float(p[1])
 
 
+def predict_goal(goal, speed_mps: float, wheel_deg: float, wheelbase_m: float, tau_s: float):
+    """The goal point as it will be seen from where the car is `tau_s` seconds from now.
+
+    The camera frame shows the world where the car WAS; by the time the steering command reaches the
+    wheels the car has moved on. Assume it keeps its current speed and wheel angle (+ = left) for tau:
+    it drives an arc of curvature tan(wheel)/L. Move the goal into the car frame at the arc's end
+    (X forward from the rear axle, Y left +). With tau 0, zero speed, or a goal that would end up
+    behind the car, the goal is returned unchanged."""
+    x, y = goal
+    s = speed_mps * tau_s
+    if s <= 0.0:
+        return float(x), float(y)
+    k = math.tan(math.radians(wheel_deg)) / wheelbase_m
+    yaw = k * s
+    if abs(k) < 1e-6:
+        dx, dy = s, 0.0
+    else:
+        dx, dy = math.sin(yaw) / k, (1.0 - math.cos(yaw)) / k
+    px, py = x - dx, y - dy
+    c, sn = math.cos(yaw), math.sin(yaw)
+    nx, ny = c * px + sn * py, -sn * px + c * py
+    if nx <= 0.05:
+        return float(x), float(y)
+    return float(nx), float(ny)
+
+
 def pursuit_steer(goal, wheelbase_m: float, steer_max_deg: float) -> float:
     """Pure pursuit: wheel angle = atan(2 L sin(alpha) / Ld) for the goal point (x, y) seen from the
     rear axle, as a steering command (-1 left .. +1 right)."""

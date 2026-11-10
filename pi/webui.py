@@ -60,6 +60,8 @@ KNOBS = [
     ("pursuit_ld_gain_s", "Steering law", "Lookahead per m/s", 0.0, 0.6, 0.05, "Extra lookahead per m/s of modelled speed, so it looks further ahead when fast."),
     ("pursuit_pd", "Steering law", "PD share with pursuit", 0.0, 1.0, 0.05, "Share of KP/KD added on top of pure pursuit as camera-error feedback. 0.15 = default mix; 0 = pursuit alone; 0.3+ ran wide at race speed in the simulator."),
     ("steer_max_deg", "Steering law", "Full-lock wheel angle (deg)", 10.0, 30.0, 0.5, "Wheel angle at full steering. 18 is fitted to recorded runs, not measured. Used by pure pursuit and feedforward; the simulator uses the same value."),
+    ("pursuit_predict_s", "Steering law", "Delay compensation (s)", 0.0, 0.3, 0.01, "Pure pursuit aims from where the car will be this long after the camera frame (it keeps moving while the frame is processed and the servo turns). 0 = off. Logs suggest about 0.15 s from command to motion."),
+    ("conf_slow_below", "Full auto speed", "Slow when detection below", 0.0, 0.9, 0.05, "Below this line-detection confidence, throttle blends down to curve speed (reaching it at Min confidence). Real tracking is usually 0.7-0.85. 0 = off."),
     ("cam_height_m", "Steering law", "Camera height (m)", 0.08, 0.22, 0.005, "Lens centre above the floor. 0.12 is ESTIMATED (Waveshare photos, mat lane width); measure it with a ruler and enter it. Pure pursuit aims through this: set too high and the car runs wide."),
     ("cam_pitch_deg", "Steering law", "Camera tilt down (deg)", 0.0, 30.0, 0.5, "How far the camera's view points down from horizontal. 15 is ESTIMATED from recorded frames; measure with a phone level against the board. Set too low and pure pursuit runs wide."),
     ("speed_straight", "Full auto speed", "Straight speed (plan)", 0.0, 1.0, 0.01, "0 = off. Fast target on a settled straight. Bends and large corrections reduce it."),
@@ -110,7 +112,7 @@ INT_KNOBS = {"s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "corner_plan", "
 RACE_KEYS = ("speed_straight", "speed_corner", "speed_transition", "speed_ramp_down", "speed_ramp_up",
              "kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd",
              "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing", "steering_rate_limit",
-             "ff_gain", "pure_pursuit", "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "steer_max_deg",
+             "ff_gain", "pure_pursuit", "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "steer_max_deg", "conf_slow_below",
              "corner_blend_start", "corner_blend_full", "corner_exit_steer", "corner_plan",
              "lost_hold_heading", "coast_s", "slow_s", "max_auto", "top_throttle")
 # Changes each preset makes to the race values.
@@ -197,7 +199,7 @@ class Hub:
             "lost_timeout_s": c.lost_timeout_s,
             "ff_gain": c.ff_gain, "corner_plan": int(bool(c.corner_plan)), "corner_margin": c.corner_margin,
             "pure_pursuit": int(bool(c.pure_pursuit)), "pursuit_ld_m": c.pursuit_ld_m,
-            "pursuit_ld_gain_s": c.pursuit_ld_gain_s, "pursuit_pd": c.pursuit_pd, "steer_max_deg": c.steer_max_deg,
+            "pursuit_ld_gain_s": c.pursuit_ld_gain_s, "pursuit_pd": c.pursuit_pd, "pursuit_predict_s": c.pursuit_predict_s, "conf_slow_below": c.conf_slow_below, "steer_max_deg": c.steer_max_deg,
             "cam_height_m": self._model().cam_height_m, "cam_pitch_deg": self._model().cam_pitch_deg,
             "single_line_stop_s": getattr(self.pilot, "single_line_stop_s", 0.0),
             "lost_hold_heading": int(bool(c.lost_hold_heading)),
@@ -263,7 +265,7 @@ class Hub:
         if kid in ("kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd", "corner_blend_start", "corner_blend_full", "corner_exit_steer",
                    "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing",
                    "steering_rate_limit", "s_lo", "v_lo", "min_confidence", "lost_timeout_s", "ff_gain", "corner_margin",
-                   "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "steer_max_deg"):
+                   "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "steer_max_deg", "conf_slow_below"):
             setattr(c, kid, x)
         elif kid in ("cam_height_m", "cam_pitch_deg"):
             self.set_camera(**{kid: x})
@@ -353,8 +355,8 @@ class Hub:
         out = []
         for pid, label, change, text in (
                 ("race", "Race", {}, f"The race values from line_config.py: straight {race.get('speed_straight', 0):.2f}, curve "
-                 f"{race.get('speed_corner', 0):.2f}, {law}, target {race.get('target_x_ratio', 0):.2f}. About 3.5 s a lap in the simulator; never ran "
-                 "wide with any ONE assumed value wrong, but can with two wrong at once. Not yet driven at this speed on the real car."),
+                 f"{race.get('speed_corner', 0):.2f}, {law}, target {race.get('target_x_ratio', 0):.2f}. About 3.7 s a lap in the simulator, with delay "
+                 "compensation on; never ran wide even with two assumed values wrong at once. Not yet driven at this speed on the real car."),
                 ("safe", "Safe race", self.safe_speeds, f"Race steering at straight {self.safe_speeds.get('speed_straight', 0):.2f} / curve "
                  f"{self.safe_speeds.get('speed_corner', 0):.2f}: about 4.1 s a lap, and never ran wide in the simulator even with two "
                  "assumed values wrong at once. Use it if Race runs wide."),

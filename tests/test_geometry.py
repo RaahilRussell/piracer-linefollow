@@ -14,7 +14,7 @@ import line_config  # noqa: E402
 from donkey_part import LineFollowerPilot, load_line_config  # noqa: E402
 from linetrack.config import Config  # noqa: E402
 from linetrack.controller import DRIVE, SteeringController  # noqa: E402
-from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, corner_speed,  # noqa: E402
+from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, corner_speed, predict_goal,  # noqa: E402
                                 fit_bend, min_radius, pursuit_goal, pursuit_steer, speed_of_cmd, steer_for_curvature)
 
 
@@ -224,6 +224,28 @@ class TestFullLockAngle(unittest.TestCase):
 
 class TestPurePursuit(unittest.TestCase):
     L = 0.1741
+
+    def test_prediction_off_or_stopped_leaves_the_goal(self):
+        self.assertEqual(predict_goal((0.6, 0.1), 1.5, 10.0, self.L, 0.0), (0.6, 0.1))
+        self.assertEqual(predict_goal((0.6, 0.1), 0.0, 10.0, self.L, 0.15), (0.6, 0.1))
+
+    def test_prediction_on_a_straight_moves_the_goal_closer(self):
+        x, y = predict_goal((0.6, 0.1), 1.0, 0.0, self.L, 0.1)       # 0.1 m driven straight ahead
+        self.assertAlmostEqual(x, 0.5, places=6)
+        self.assertAlmostEqual(y, 0.1, places=6)
+
+    def test_prediction_on_a_circle_keeps_a_point_of_that_circle_on_it(self):
+        # turning left on radius R: the circle stays the same circle in the new car frame, so a goal on
+        # it stays on it, and it comes closer by the arc driven
+        R, wheel = 0.56, math.degrees(math.atan(self.L / 0.56))
+        th = 1.2
+        goal = (R * math.sin(th), R * (1 - math.cos(th)))
+        x, y = predict_goal(goal, 1.5, wheel, self.L, 0.1)
+        self.assertAlmostEqual(math.hypot(x, y - R), R, places=6)     # still on the circle (centre (0, R))
+        self.assertAlmostEqual(math.atan2(x, R - y), th - 0.15 / R, places=6)
+
+    def test_prediction_never_puts_the_goal_behind_the_car(self):
+        self.assertEqual(predict_goal((0.1, 0.0), 2.0, 0.0, self.L, 0.2), (0.1, 0.0))
 
     @staticmethod
     def edge(radius=None, lateral=0.10, n=30, reach=0.9):

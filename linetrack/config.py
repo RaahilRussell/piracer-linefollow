@@ -104,9 +104,11 @@ class Config:
     pursuit_ld_m: float = 0.55         # lookahead distance Ld0, metres from the rear axle
     pursuit_ld_gain_s: float = 0.0     # extra lookahead per m/s of (modelled) speed
     pursuit_pd: float = 0.3            # share of KP/KD kept as a correction on top of pure pursuit
+    pursuit_predict_s: float = 0.0     # delay compensation: aim from where the car will be this many s after the frame (0 = off)
 
     # --- Safety / timing ---
     min_confidence: float = 0.35
+    conf_slow_below: float = 0.0       # below this detection confidence, blend throttle down to curve speed (0 = off)
     max_frame_age_s: float = 0.35      # no fresh camera content for this long -> stale
     lost_timeout_s: float = 0.6        # after this long without a line, steering re-centres
     throttle: float = 0.18             # used only in DRIVE mode

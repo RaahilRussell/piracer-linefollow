@@ -29,7 +29,7 @@ import numpy as np
 from linetrack.config import Config
 from linetrack.controller import DRIVE, STEER_ONLY, Command, SteeringController
 from linetrack.detector import LeftLineDetector
-from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, fit_bend, pursuit_goal,
+from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, fit_bend, predict_goal, pursuit_goal,
                                 pursuit_steer, speed_of_cmd, steer_for_curvature)
 
 # extra keys in line_config.py that are not Config fields
@@ -116,6 +116,7 @@ class LineDetectorPart:
         self.pilot = pilot
         pilot.bend_source = lambda: self.bend       # corner geometry for sections / feedforward / corner speed
         pilot.path_source = lambda: self.path       # edge ground points for pure pursuit
+        pilot.conf_source = lambda: self._det.confidence if self._det is not None else None   # detection confidence
 
     def run(self, img_rgb):
         now = self.clock()
@@ -303,6 +304,8 @@ class LineFollowerPilot:
         self.model = model or CarModel()
         self.bend_source = None     # callable -> Bend | None (drive_line.py: lambda: det.bend)
         self.path_source = None     # callable -> LineDetectorPart.path (edge ground points) for pure pursuit
+        self.conf_source = None     # callable -> detection confidence 0..1 (for the low-confidence slowdown)
+        self.conf_cap = None        # throttle cap from a low-confidence detection this frame, or None
         self.pursuit_goal = None    # pure-pursuit goal point this frame (x, y) m, or None
         self.curvature = None       # smoothed path curvature ahead, 1/m (+ left)
         self.corner_cap = None      # throttle cap from the corner planner this frame (None = not limiting)
@@ -411,6 +414,11 @@ class LineFollowerPilot:
             goal = pursuit_goal(ground, lateral, ld)
             if goal is None:
                 return None
+            if c.pursuit_predict_s > 0:
+                # the frame shows where the car WAS: aim from where it will be when this command lands,
+                # assuming it holds its current speed and wheel angle (command + = right, wheel + = left)
+                wheel = -self.ctrl.angle * max(1.0, c.steer_max_deg)
+                goal = predict_goal(goal, v, wheel, self.model.wheelbase_m, c.pursuit_predict_s)
             self.pursuit_goal = goal
             return pursuit_steer(goal, self.model.wheelbase_m, max(1.0, c.steer_max_deg))
         except Exception:
@@ -526,6 +534,20 @@ class LineFollowerPilot:
                 cap = max(self.cfg.corner_min_throttle, cmd_for_speed(self.model, v_ok))
                 if cap < throttle:
                     self.corner_cap, throttle = cap, cap
+        self.conf_cap = None
+        if (self.cfg.conf_slow_below > 0 and self.speed_plan is not None and mode == "local" and cmd.status == "TRACKING"
+                and self.conf_source is not None):
+            # a shaky detection (glare, half the line out of view) is not the moment for straight speed:
+            # blend down to curve speed as confidence falls from conf_slow_below to min_confidence
+            conf = self.conf_source()
+            if conf is not None and conf < self.cfg.conf_slow_below:
+                lo = min(self.cfg.min_confidence, self.cfg.conf_slow_below - 1e-3)
+                w = min(1.0, max(0.0, (conf - lo) / (self.cfg.conf_slow_below - lo)))
+                floor = self.speed_plan.corner
+                top = self.speed_target if self.speed_target is not None else throttle   # scale the plan's target, not
+                cap = floor + (max(top, floor) - floor) * w                               # last frame's capped throttle
+                if cap < throttle:
+                    self.conf_cap, throttle = cap, cap
         if self.speed_plan is not None and mode == "local" and cmd.status == "TRACKING" and k is None:
             # Apply after auto-crawl too: a startup boost cannot override unknown-geometry limits.
             throttle = min(throttle, self.speed_plan.corner)

@@ -53,6 +53,11 @@ PURSUIT_LD_GAIN_S = 0.30   # extra lookahead per m/s (speed from SPEED_TABLE bel
 PURSUIT_PD = 0.10          # Nov 10: 0.10-0.15 ok, 0.05 and 0.25 fail. Share of KP/KD (3.5/0.4 -> 0.35/0.04) added on top of pure pursuit as image-space feedback.
                            # Pure pursuit aims through the camera ground model (pitch/height/FOV assumed); this PD term
                            # closes whatever offset a wrong model leaves.
+PURSUIT_PREDICT_S = 0.15   # racer-v2: delay compensation, aim from where the car will be this long after the frame (0 = off).
+                           # Matches the ~150 ms command-to-motion lag in the Nov 8 logs. Sim at 1.00/0.92 --pairs: 0 -> 123 wide
+                           # (4 pairs fail), 0.15 -> 60 (1 pair), 0.20 same, 0.30 worse. NOT YET DRIVEN: if it misbehaves, set 0.
+CONF_SLOW_BELOW = 0.0      # racer-v2 EXPERIMENT, off: below this detection confidence, blend throttle down to curve speed.
+                           # Real tracking confidence is usually 0.7-0.85 (worst 5%: ~0.5); try 0.6.
 CORNER_EXIT_STEER = 0.0    # curve exit hold: no measurable effect in the simulator, so off
 CORNER_PLAN = False        # corner speed planning: adds little until grip is measured
 CORNER_MARGIN = 0.8
@@ -115,13 +120,14 @@ SINGLE_LINE_STOP_S = 2.5
 SPEED_STRAIGHT = 0.75
 SPEED_TRANSITION = 0.75
 SPEED_CORNER = 0.70
-# RACE VALUES (simulated only, Nov 10 re-fit with the camera at 0.12 m / 15 deg, steering rate 6):
-# 1.00 / 0.92 = 3.50 s lap and passes all 15 single-unknown race_eval variations (5 seeds x 40 s). It does NOT pass
-# two unknowns wrong at once (e.g. faster car + extra delay): if the car runs wide, press "Safe race".
+# RACE VALUES (simulated only; camera 0.12 m / 15 deg, steering rate 6, delay compensation 0.15 s):
+# 1.00 / 0.90 = 3.69 s lap and passes all 21 race_eval variations, two-unknowns-wrong pairs included. 1.00 / 0.91
+# also passes (3.67 s) but 0.92 fails fast car + low grip, so 0.90 keeps one step of margin. Without delay
+# compensation 1.00 / 0.90 fails 3 pairs: if PURSUIT_PREDICT_S is set to 0, press "Safe race" instead.
 # The dashboard's "Race" preset. Every speed in the simulator rests on the assumed SPEED_TABLE, so trust the lap tuner.
 RACE_SPEED_STRAIGHT = 1.00
-RACE_SPEED_TRANSITION = 0.96
-RACE_SPEED_CORNER = 0.92
+RACE_SPEED_TRANSITION = 0.95
+RACE_SPEED_CORNER = 0.90
 # SAFE RACE: 0.92 / 0.86 = 4.1 s lap, the fastest pair that also passes every two-unknowns-wrong pair. The "Safe race" preset.
 SAFE_SPEED_STRAIGHT = 0.92
 SAFE_SPEED_TRANSITION = 0.89

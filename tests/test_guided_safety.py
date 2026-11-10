@@ -344,6 +344,38 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class ConfidenceSlowdown(unittest.TestCase):
+    """racer-v2: a shaky detection blends throttle down to curve speed (CONF_SLOW_BELOW, off by default)."""
+
+    def drive(self, conf, slow_below):
+        t = [0.0]
+        pilot = LineFollowerPilot(Config(max_throttle=1.0, conf_slow_below=slow_below, target_x_ratio=0.40),
+                                  clock=lambda: t[0], speed_plan=SpeedPlan(.9, .6, transition=.75))
+        pilot.bend_source = lambda: Bend(0.0, 0.0, .15, .4, 1., 10, 0.)      # a straight in view
+        pilot.conf_source = lambda: conf
+        thr = 0.0
+        for _ in range(120):                                                  # 6 s: the plan ramps to straight speed
+            t[0] += .05
+            _, thr = pilot.run("local", 0.40, True, 0.0, both=True)
+        return thr, pilot
+
+    def test_off_by_default(self):
+        self.assertEqual(Config().conf_slow_below, 0.0)
+        self.assertAlmostEqual(self.drive(0.36, 0.0)[0], self.drive(0.85, 0.0)[0])
+
+    def test_confident_detection_keeps_straight_speed(self):
+        thr, pilot = self.drive(0.85, 0.6)
+        self.assertGreater(thr, .6 + .1)
+        self.assertIsNone(pilot.conf_cap)
+
+    def test_shaky_detection_drops_to_curve_speed_never_below(self):
+        full = self.drive(0.85, 0.6)[0]
+        low, pilot = self.drive(0.35, 0.6)
+        self.assertAlmostEqual(low, .6, places=3)                             # at min_confidence: curve speed
+        mid = self.drive(0.475, 0.6)[0]                                       # half way: half way
+        self.assertAlmostEqual(mid, (.6 + full) / 2, places=2)
+
+
 class TunerRulesPersist(unittest.TestCase):
     def test_rules_saved_on_car_survive_restart(self):
         import tempfile
