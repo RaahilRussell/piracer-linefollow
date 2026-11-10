@@ -222,6 +222,15 @@ canvas.chart { width: 100%; height: 168px; display: block; }
 .knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px 24px; }
 .lap-tune { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .lap-tune .lap-pid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px 20px; }
+.lap-page-intro { margin-bottom: 14px; }
+.lap-workflow-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%, 420px),1fr)); gap:14px; align-items:start; }
+.lap-workflow-grid > .card { margin:0; min-width:0; }
+.both-tuner { display:grid; gap:12px; align-content:start; }
+.both-tuner > .section-tune { border:0; padding:0; margin:0; }
+.tuner-steps { margin:0; padding-left:24px; display:grid; gap:8px; }
+.tuner-steps li { padding-left:3px; }
+.tuner-warning { padding:10px 12px; border-radius:8px; background:color-mix(in srgb, var(--warn) 12%, transparent); }
+@media(max-width:520px) { .lap-workflow-grid { grid-template-columns:minmax(0,1fr); } .lap-tune { padding:12px; } }
 .kgroup { display: grid; gap: 10px; align-content: start; }
 .knob { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 2px 8px; align-items: center; }
 .knob label { font-weight: 500; }
@@ -320,6 +329,7 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
     <nav class="seg views" aria-label="Section">
       <a href="#drive" data-view="drive">Drive</a>
       <a href="#diagnose" data-view="diagnose">Diagnose <span class="count" id="diagCount" hidden></span></a>
+      <a href="#laptune" data-view="laptune">Lap tuner</a>
       <a href="#tune" data-view="tune">Tune</a>
       <a href="#simulator" data-view="simulator">Simulator</a>
       <a href="#runs" data-view="runs">Runs</a>
@@ -414,6 +424,9 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
     </div>
   </div>
 </section>
+
+<!-- Dedicated home for the lap-by-lap speed ladder and straight/curve tuner. -->
+<section class="view" id="view-laptune" hidden></section>
 
 <!-- ============================ DIAGNOSE ============================ -->
 <section class="view" id="view-diagnose" hidden>
@@ -593,10 +606,10 @@ async function api(path, body) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
-const view = () => { const v = (location.hash || '#drive').slice(1); return ['tune', 'diagnose'].includes(v) ? 'drive' : v; };
+const view = () => { const v = (location.hash || '#drive').slice(1); return v === 'tune' ? 'laptune' : v === 'diagnose' ? 'drive' : v; };
 
 /* ---------------- routing ---------------- */
-const VIEWS = ['drive', 'diagnose', 'tune', 'simulator', 'runs'];
+const VIEWS = ['drive', 'diagnose', 'tune', 'laptune', 'simulator', 'runs'];
 function route() {
   const v = VIEWS.includes(view()) ? view() : 'drive';
   VIEWS.forEach(n => { $('view-' + n).hidden = n !== v; });
@@ -604,6 +617,7 @@ function route() {
   if (v === 'runs') loadRuns();
   if (v === 'diagnose') pollDiagnose();
   if (v === 'tune') { renderTuneProfiles(); schedulePreview(); }
+  if (v === 'laptune') syncLapSpeed();
   if (v === 'simulator') simEnter();
   drawLive();
 }
@@ -1312,19 +1326,20 @@ addEventListener('resize', () => { drawLive(); if (runRows.length) drawRun(+$('s
 
 /* ---------------- start ---------------- */
 function organizeWorkbench() {
-  const drive = $('view-drive'), tune = $('view-tune'), diagnosis = $('view-diagnose');
+  const drive = $('view-drive'), tune = $('view-tune'), diagnosis = $('view-diagnose'), laptune = $('view-laptune');
   const mission = drive.querySelector('.mission');
-  mission.querySelector('h1').textContent = 'Drive & tune';
-  mission.querySelector('.mission-main p').textContent = 'Video, tuning and checks in one place. Gamepad sticks take over Auto.';
+  mission.querySelector('h1').textContent = 'Drive controls';
+  mission.querySelector('.mission-main p').textContent = 'Live camera, manual controls, quick checks and STOP. Guided tuning has its own section.';
   mission.querySelector('.mission-readout').hidden = true;
   mission.style.gridTemplateColumns = '1fr';
   $('missionSafe').hidden = true;
   $('missionCheck').textContent = 'Check now';
-  mission.querySelector('a[href="#tune"]').remove();
+  const openLapTuner = mission.querySelector('a[href="#tune"]');
+  openLapTuner.href = '#laptune'; openLapTuner.textContent = 'Open lap tuner';
   mission.querySelector('.mission-actions').append($('btnSave'));
   const reviewButton = document.createElement('button'); reviewButton.className = 'btn'; reviewButton.id = 'reviewStart'; reviewButton.textContent = 'Download & analyze recordings';
   mission.querySelector('.mission-actions').append(reviewButton);
-  document.querySelector('[data-view="drive"]').textContent = 'Drive & tune';
+  document.querySelector('[data-view="drive"]').textContent = 'Drive';
   document.querySelector('[data-view="tune"]').hidden = true;
   const diagNav = document.querySelector('[data-view="diagnose"]'); diagNav.hidden = true;
   // Keep the diagnosis count available in the unified screen.
@@ -1348,7 +1363,7 @@ function organizeWorkbench() {
   checkDetails.append(diagnosis.firstElementChild);
 
   const sectionTune = drive.ownerDocument.querySelector('.section-tune');
-  controls.innerHTML = '<div class="card-h"><h2>One full lap at a time</h2></div><p class="note">Start slowly, complete one circle, and finish at the start mark. A clean lap stages the next run 0.03 faster; mixed tracking repeats the same speed; a clear failure stops the ladder. Steering can reach its limit and still count as a good lap when it keeps the line tracked.</p>';
+  controls.innerHTML = '<div class="card-h"><h2>Drive tools</h2></div><p class="note">Use the Lap tuner section for guided speed steps and separate straight/curve tuning. The camera, controls and emergency STOP stay here.</p>';
   const lapCard = document.createElement('section'); lapCard.className = 'lap-tune card'; lapCard.innerHTML = `
     <h3>1 · Set speed and target</h3>
     <p class="note">Slow baseline is 0.55 throttle (about PWM 390). Wheel motion may stop below roughly 0.45–0.55. Slider changes straight, transition and curve speed together.</p>
@@ -1362,13 +1377,22 @@ function organizeWorkbench() {
     <h3>2 · Run one circle, then stop</h3>
     <p class="note">Place the car at your chosen start mark with a clear circle ahead. Start only when the camera says TRACKING. Press finish when it returns to that mark; the dashboard cannot reliably identify a lap boundary from camera frames alone.</p>
     <div class="row"><button class="btn primary" id="lapStart">Start slow full-circle lap</button><button class="btn danger" id="lapStop">Finish lap · stop & review</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
-  controls.append(lapCard);
+  const lapIntro = document.createElement('div'); lapIntro.className = 'card lap-page-intro';
+  lapIntro.innerHTML = '<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Choose one of two focused workflows. Both use Full Auto and stop the car when the trial ends.</p></div><a class="btn" href="#drive">Open live camera &amp; controls</a></div>';
+  const lapSteps = document.createElement('div'); lapSteps.className = 'lap-workflow-grid';
+  lapSteps.append(lapCard);
+  laptune.append(lapIntro, lapSteps);
   lapCard.querySelector('.lap-pid').append($('bk_kp').closest('.bigknob'), $('bk_kd').closest('.bigknob'));
-  const sectionDetails = document.createElement('details'); sectionDetails.className = 'more';
-  sectionDetails.innerHTML = '<summary>Advanced: section tuning, simulator and recording analysis</summary>';
-  sectionDetails.append(sectionTune);
-  controls.append(sectionDetails);
-  controls.querySelector('.card-h').append($('atState'));
+  const sectionDetails = document.createElement('section'); sectionDetails.className = 'card both-tuner';
+  sectionDetails.innerHTML = '<div class="card-h"><div><h2>Tune straight + curve automatically</h2><p class="note">This tunes the two steering sections at the current speed. It does not climb the speed ladder.</p></div></div><ol class="tuner-steps"><li>Start in <b>Full Auto</b> and place the car on the track.</li><li>Press <b>Tune both automatically</b> and confirm. Let it observe at least two straight/curve transitions.</li><li>It evaluates each section, adjusts KP/KD when the health checks call for it, and stops when both pass or tracking fails.</li><li>Review the section results, then choose <b>Save section gains</b> to keep them.</li></ol><p class="note tuner-warning">The car moves during this trial. Keep the track clear and STOP if its path looks unsafe. Near-limit steering is acceptable while it keeps the line tracked.</p>';
+  sectionDetails.append($('atState'), sectionTune);
+  const autoTuneDetails = document.createElement('details'); autoTuneDetails.className = 'more';
+  autoTuneDetails.innerHTML = '<summary>Results and speed limits</summary>';
+  autoTuneDetails.append($('atMsg'), $('saveNote'), $('atTable'));
+  const shared = document.createElement('details'); shared.className = 'more';
+  shared.innerHTML = '<summary>Speed limits & transition settings</summary>';
+  sectionDetails.append(autoTuneDetails, shared);
+  lapSteps.append(sectionDetails);
   const cardStraight = $('sectionStraightCard'), cardCorner = $('sectionCornerCard');
   const moveKnob = (id, dest) => dest.append($('bk_' + id).closest('.bigknob'));
   const makeKnob = (id, label, help, max, step) => {
@@ -1405,12 +1429,9 @@ function organizeWorkbench() {
     if (el.tagName === 'H3' || el.tagName === 'P' || el.classList.contains('steps') || (el.classList.contains('section-grid') && el !== sectionGrid)) el.hidden = true;
   }
   sectionTune.prepend(sectionGrid);
-  const shared = document.createElement('details'); shared.className = 'more';
-  shared.innerHTML = '<summary>Speed limits & transition</summary>';
   const limitKnob = makeKnob('max_auto', 'Full Auto speed ceiling', 'The overall motor limit also applies; see the effective speed limit beside the camera.', .8, .01);
   shared.append(limitKnob);
   for (const id of ['speed_transition', 'speed_ramp_down', 'speed_ramp_up']) moveKnob(id, shared);
-  sectionDetails.append(shared, $('atMsg'), $('saveNote'), $('atTable'));
   const reviewPanel = document.createElement('details'); reviewPanel.className = 'more'; reviewPanel.id = 'reviewPanel';
   reviewPanel.innerHTML = '<summary>Recording analysis · download → replay → simulation → stress tests</summary><p class="note" id="reviewHint">Analysis runs on the Mac. Settings are never applied automatically.</p><div class="row"><label for="reviewHost">Pi IP</label><input class="field" id="reviewHost" placeholder="Enter current Pi IP" style="width:160px"><label><input type="checkbox" id="reviewDeep" checked> Include rendered camera & uncertainty tests</label><button class="btn" id="reviewCancel">Cancel analysis</button></div><progress id="reviewProgress" max="100" value="0" style="width:100%" aria-label="Recording analysis progress"></progress><p id="reviewStage" class="note">Ready</p><div id="reviewReport"></div><a class="btn" id="reviewDownload" hidden download="recording-review.json">Download report</a>';
   controls.append(reviewPanel);
@@ -1421,7 +1442,7 @@ function organizeWorkbench() {
     catch (e) { $('reviewStage').textContent = e.message; $('reviewStart').disabled = false; }
   };
   $('reviewCancel').onclick = async () => { try { await api('/api/review', {action:'cancel'}); await pollReview(); } catch (e) { toast(e.message); } };
-  $('sectionSave').hidden = true; // One persistent Save Tuning action at the top.
+  $('sectionSave').hidden = false;
 
   const backup = drive.querySelector(':scope > .cols');
   const padCard = $('pad').closest('.card');
