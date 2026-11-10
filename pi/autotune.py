@@ -69,7 +69,7 @@ class AutoTuner:
     pilot: object                       # LineFollowerPilot (its .cfg is what the car uses)
     start: float = 0.70                 # faster initial throttle for Lap Tuner trials
     step: float = 0.08
-    ceiling: float = 0.80               # never above this
+    ceiling: float = 1.00               # never above this
     window_s: float = 10.0
     settle_s: float = 2.0               # ignore this long after any change
     max_retunes: int = 3                # per speed level

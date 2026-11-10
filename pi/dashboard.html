@@ -496,9 +496,9 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
       <h3>Lap speeds</h3>
       <p class="note">Fast when straight and settled; slower in bends or during a large correction. These are throttle settings, not measured m/s. The overall and Full Auto limits still apply.</p>
       <div class="section-grid" style="margin:16px 0">
-        <div class="bigknob"><label for="bk_speed_straight" id="lbl_speed_straight">Straight speed</label><input class="field" type="number" id="bkn_speed_straight" min="0" max="0.8" step="0.01" aria-label="Straight speed value"><input type="range" id="bk_speed_straight" min="0" max="0.8" step="0.01"><span class="help">Throttle command for straights. Zero disables the speed plan. Overall and Full Auto limits still apply.</span></div>
-        <div class="bigknob"><label for="bk_speed_corner" id="lbl_speed_corner">Corner speed</label><input class="field" type="number" id="bkn_speed_corner" min="0" max="0.8" step="0.01" aria-label="Corner speed value"><input type="range" id="bk_speed_corner" min="0" max="0.8" step="0.01"><span class="help">Throttle command through bends. If set first, straight speed starts at the current Full Auto cap. Overall limits still apply.</span></div>
-        <div class="bigknob"><label for="bk_speed_transition" id="lbl_speed_transition">Entry / exit speed</label><input class="field" type="number" id="bkn_speed_transition" min="0" max="0.8" step="0.01" aria-label="Transition speed value"><input type="range" id="bk_speed_transition" min="0" max="0.8" step="0.01"><span class="help">The middle of the handoff. Kept between corner and straight speed.</span></div>
+        <div class="bigknob"><label for="bk_speed_straight" id="lbl_speed_straight">Straight speed</label><input class="field" type="number" id="bkn_speed_straight" min="0" max="1" step="0.01" aria-label="Straight speed value"><input type="range" id="bk_speed_straight" min="0" max="1" step="0.01"><span class="help">Throttle command for straights. Zero disables the speed plan. Overall and Full Auto limits still apply.</span></div>
+        <div class="bigknob"><label for="bk_speed_corner" id="lbl_speed_corner">Corner speed</label><input class="field" type="number" id="bkn_speed_corner" min="0" max="1" step="0.01" aria-label="Corner speed value"><input type="range" id="bk_speed_corner" min="0" max="1" step="0.01"><span class="help">Throttle command through bends. If set first, straight speed starts at the current Full Auto cap. Overall limits still apply.</span></div>
+        <div class="bigknob"><label for="bk_speed_transition" id="lbl_speed_transition">Entry / exit speed</label><input class="field" type="number" id="bkn_speed_transition" min="0" max="1" step="0.01" aria-label="Transition speed value"><input type="range" id="bk_speed_transition" min="0" max="1" step="0.01"><span class="help">The middle of the handoff. Kept between corner and straight speed.</span></div>
         <div class="bigknob"><label for="bk_speed_ramp_down" id="lbl_speed_ramp_down">Slowdown rate</label><input class="field" type="number" id="bkn_speed_ramp_down" min="0.05" max="2" step="0.05" aria-label="Slowdown rate value"><input type="range" id="bk_speed_ramp_down" min="0.05" max="2" step="0.05"><span class="help">Higher slows sooner and more firmly; lower makes a longer transition.</span></div>
         <div class="bigknob"><label for="bk_speed_ramp_up" id="lbl_speed_ramp_up">Acceleration rate</label><input class="field" type="number" id="bkn_speed_ramp_up" min="0.05" max="1" step="0.05" aria-label="Acceleration rate value"><input type="range" id="bk_speed_ramp_up" min="0.05" max="1" step="0.05"><span class="help">Lower eases back onto the straight more gradually.</span></div>
       </div>
@@ -528,7 +528,7 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
       <label><input type="radio" name="strat" value="max_speed"><b>Max speed</b><span class="note">Keeps your KP/KD and only climbs speed until it isn't healthy.</span></label>
       <label><input type="radio" name="strat" value="zn"><b>Ziegler–Nichols <span class="badge warn plain">Cross-check</span></b><span class="note">KD 0, raises KP until a steady weave (deliberately!), then KP = 0.8·Ku, KD = KP·Tu/8 and verifies. Needs about 0.8 throttle to weave; aborts if it loses the line. Have STOP ready.</span></label>
     </div>
-    <div class="row"><label for="atCeil">Never faster than</label><input class="field" type="number" id="atCeil" min="0.5" max="0.80" step="0.01" value="0.80"><span class="note" id="atCeilPwm"></span></div>
+    <div class="row"><label for="atCeil">Never faster than</label><input class="field" type="number" id="atCeil" min="0.5" max="1.00" step="0.01" value="1.00"><span class="note" id="atCeilPwm"></span></div>
     <div class="row" id="atSpeedRow"><label for="atSpeed">Test speed</label><input class="field" type="number" id="atSpeed" min="0.5" max="1" step="0.01" value="" placeholder="auto"><span class="note" id="atSpeedNote"></span></div>
     <div class="row"><button class="btn primary" id="atStart">Run the slow → medium → safe max tune</button><button class="btn" id="atStop">Stop now</button><button class="btn" id="atKeep" disabled>Keep Result</button><button class="btn" id="atSave" disabled>Save as Car-Verified Profiles</button></div>
     <p class="note" id="atMsg"></p>
@@ -1386,8 +1386,8 @@ function organizeWorkbench() {
     <h3>1 · Set throttle and target</h3>
     <p class="note">Starting speed is 0.70 throttle (about PWM 396). This sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
     <div class="bigknob"><label for="lapSpeed">Whole-lap throttle <output id="lapSpeedReadout">0.70</output></label>
-      <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="0.80" step="0.01" value="0.70" aria-label="Whole-lap speed value">
-      <input id="lapSpeed" type="range" min="0.45" max="0.80" step="0.01" value="0.70" aria-label="Whole-lap speed">
+      <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="1.00" step="0.01" value="0.70" aria-label="Whole-lap speed value">
+      <input id="lapSpeed" type="range" min="0.45" max="1.00" step="0.01" value="0.70" aria-label="Whole-lap speed">
       <span class="help" id="lapSpeedStatus">Applied to all three Full Auto speed sections. Manual throttle is controlled by the gamepad or touchpad.</span></div>
     <p class="note">Lap target: left line at <b>0.46 of image width</b>, just left of center (0.50). It is a camera target, separate from where you place the car on the start mark. Start position stays yours to set.</p>
     <div id="lapReview" class="note" aria-live="polite"></div>
@@ -1468,7 +1468,7 @@ function organizeWorkbench() {
     if (el.tagName === 'H3' || el.tagName === 'P' || el.classList.contains('steps') || (el.classList.contains('section-grid') && el !== sectionGrid)) el.hidden = true;
   }
   sectionTune.prepend(sectionGrid);
-  const limitKnob = makeKnob('max_auto', 'Full Auto speed ceiling', 'The overall motor limit also applies; see the effective speed limit beside the camera.', .8, .01);
+  const limitKnob = makeKnob('max_auto', 'Full Auto speed ceiling', 'The overall motor limit also applies; see the effective speed limit beside the camera.', 1, .01);
   shared.append(limitKnob);
   for (const id of ['speed_transition', 'speed_ramp_down', 'speed_ramp_up']) moveKnob(id, shared);
   const reviewPanel = document.createElement('details'); reviewPanel.className = 'more'; reviewPanel.id = 'reviewPanel';
@@ -1528,7 +1528,7 @@ function syncLapSpeed() {
   }
   const range = $('lapSpeed'), number = $('lapSpeedNumber');
   if (!range || !number || document.activeElement === range || document.activeElement === number) return;
-  const cap = Math.min(knobVal('max_auto') ?? 0.8, knobVal('top_throttle') ?? 0.8, 0.8);
+  const cap = Math.min(knobVal('max_auto') ?? 1, knobVal('top_throttle') ?? 1, 1);
   const current = [knobVal('speed_straight'), knobVal('speed_transition'), knobVal('speed_corner')]
     .filter(v => v != null && +v > 0).map(Number);
   const value = Math.min(cap, current.length ? Math.min(...current) : 0.70);
@@ -1589,7 +1589,7 @@ function wireLapControls() {
   number.addEventListener('input', changed);
   $('lapStart').onclick = async () => {
     if (lapTune.active) return toast('Finish the current lap before starting another.');
-    const speed = +range.value, cap = Math.min(knobVal('max_auto') ?? 0.8, knobVal('top_throttle') ?? 0.8);
+    const speed = +range.value, cap = Math.min(knobVal('max_auto') ?? 1, knobVal('top_throttle') ?? 1);
     if (!src.live || !src.fresh) return toast('Car is disconnected or telemetry is stale.');
     if (lastTele?.status !== 'TRACKING' || !lastTele?.found) return toast('Line is not being tracked. Fix the camera view before starting a lap.');
     if (speed < 0.45 || speed > cap + 1e-6) return toast(`Choose a rolling speed at or below the current Full Auto limit (${cap.toFixed(2)}).`);
