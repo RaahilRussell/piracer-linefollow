@@ -27,6 +27,17 @@ class GuidedTrials(unittest.TestCase):
             self.t += .05
             self.at.update("local", self.cmd, True, section)
 
+    def test_curve_trial_waits_for_exit_and_restores_split_speeds(self):
+        original = self.pilot.speed_plan
+        self.at.window_s = 1
+        self.at.begin_section("corner")
+        self.assertEqual(self.pilot.speed_plan.straight, original.corner)
+        self.samples("corner", 56)
+        self.assertEqual(self.at.state, "running")
+        self.samples("straight", 1)
+        self.assertEqual(self.at.result, "passed")
+        self.assertIs(self.pilot.speed_plan, original)
+
     def test_too_few_samples_never_healthy(self):
         self.assertFalse(tuning.analyze([0, 10], [0, 0], [0, 0]).healthy)
 
@@ -211,7 +222,7 @@ class GuidedTrials(unittest.TestCase):
         self.assertEqual(ctrl.pilot.speed_plan.ramp_up, .2)
         self.assertIsNone(ctrl.pilot.crawl)
         self.assertEqual(ctrl.pilot.coast_s, 0.)
-        ctrl.pilot.run("local", .5, True, 0., bend=Bend(0., 0., .15, .4, 1., 10, 0.))
+        ctrl.pilot.run("local", ctrl.cfg.target_x_ratio + .25, True, 0., bend=Bend(0., 0., .15, .4, 1., 10, 0.))
         self.assertAlmostEqual(ctrl.pilot.speed_target, .55)
 
 

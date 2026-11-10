@@ -32,14 +32,16 @@ class PilotController:
             setattr(self.cfg, k, v)
         self.clock = clock
         plan = None
-        if isinstance(speed, (int, float)):
+        if speed is None and ex["SPEED_STRAIGHT"] > 0:
+            plan = SpeedPlan(ex["SPEED_STRAIGHT"], ex["SPEED_CORNER"], transition=ex["SPEED_TRANSITION"])
+        elif isinstance(speed, (int, float)):
             plan = SpeedPlan(float(speed), float(speed))
         elif isinstance(speed, (tuple, list)):
             plan = SpeedPlan(float(speed[0]), float(speed[1]))
         if plan is not None:
             options = overrides or {}
-            plan = SpeedPlan(plan.straight, plan.corner, transition=options.get("speed_transition"),
-                             ramp_down=options.get("speed_ramp_down", 1.), ramp_up=options.get("speed_ramp_up", .4))
+            plan = SpeedPlan(plan.straight, plan.corner, transition=options.get("speed_transition", plan.transition),
+                             ramp_down=options.get("speed_ramp_down", ex["SPEED_RAMP_DOWN"]), ramp_up=options.get("speed_ramp_up", ex["SPEED_RAMP_UP"]))
         if plan is not None:
             self.cfg.max_throttle = max(self.cfg.max_throttle, plan.straight)
         self.crawl = AutoCrawl(start=ex["CRAWL_START"], hi=max(ex["CRAWL_MAX"], plan.straight if plan else 0))

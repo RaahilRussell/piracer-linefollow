@@ -145,7 +145,8 @@ class AutoTuner:
                        self.pilot.speed_plan, c.max_throttle)
         current = speed
         if current in (None, ""):
-            current = self.pilot.speed_plan.straight if self.pilot.speed_plan is not None else self.start
+            plan = self.pilot.speed_plan
+            current = getattr(plan, section, self.start)
         current = min(float(current), self.ceiling)
         self.strategy, self.section = "section", section
         self.stop_on_transition = True
@@ -169,7 +170,8 @@ class AutoTuner:
         c = self.pilot.cfg
         self._saved = (c.kp, c.kd, c.straight_kp, c.straight_kd, c.corner_kp, c.corner_kd,
                        self.pilot.speed_plan, c.max_throttle)
-        current = self.pilot.speed_plan.straight if self.pilot.speed_plan is not None else self.start
+        plan = self.pilot.speed_plan
+        current = getattr(plan, "straight", self.start)
         current = min(float(speed if speed not in (None, "") else current), self.ceiling)
         self.strategy, self.section = "sections", "both"
         self.stop_on_transition = False
@@ -308,6 +310,7 @@ class AutoTuner:
             self.pilot.ctrl.reset()
             if self.strategy == "section":
                 # Stop before repositioning; keep a candidate, but do not claim verification.
+                self.pilot.speed_plan = self._saved[6]
                 self.result, self.state = "retune", "done"
                 self.pilot.stop_motion()
                 self._say("warn", f"Adjusted {name} gains. Reset the car and run again; driving stopped")
@@ -324,6 +327,7 @@ class AutoTuner:
             if self.strategy == "sections":
                 self._advance_sections_speed()
             else:
+                self.pilot.speed_plan = self._saved[6]
                 self._guided_end("passed", "Selected section passed tracking checks")
 
     def _guided_update(self, cmd, tracking, section, now):
@@ -357,7 +361,7 @@ class AutoTuner:
             return
         self._t.append(now); self._e.append(cmd.error); self._s.append(cmd.angle)
         self._p.append(cmd.p); self._d.append(cmd.d); self._k.append(True)
-        if self._t[-1] - self._t[0] >= self.window_s:
+        if self.strategy != "section" and self._t[-1] - self._t[0] >= self.window_s:
             self._guided_judge()
             self._reset_window()
 

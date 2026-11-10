@@ -413,11 +413,17 @@ class LineFollowerPilot:
         if self.speed_plan is not None and mode == "local" and cmd.status == "TRACKING":
             # straight speed when steering is centred, easing to corner speed as steering demand rises;
             # if the car isn't rolling yet, let auto-crawl ramp it up past the motor's start point
-            self.speed_target = self.speed_plan.target(cmd.angle, self.cfg.max_steering, corner_weight, cmd.error)
-            normal_target = self.speed_plan.target(0.0, self.cfg.max_steering, corner_weight)
+            # React to the visible bend on entry; use filtered curvature on exit.
+            # A single straight-looking frame should not release corner regulation.
+            preview_weight = self._section_gains(bend.curvature)[2] if k is not None else 1.0
+            speed_weight = max(preview_weight, corner_weight)
+            if section != "straight":
+                speed_weight = max(speed_weight, 0.5)
+            self.speed_target = self.speed_plan.target(cmd.angle, self.cfg.max_steering, speed_weight, cmd.error)
+            normal_target = self.speed_plan.target(0.0, self.cfg.max_steering, speed_weight)
             self.speed_reason = ("Unknown geometry" if k is None else "Recovery correction" if self.speed_target < normal_target - 1e-6
-                                 else "Corner" if corner_weight >= 0.95 else "Transition" if corner_weight > 0 else "Settled straight")
-            throttle = self.speed_plan.throttle(cmd.angle, self.cfg.max_steering, corner_weight, dt, cmd.error)
+                                 else "Corner" if speed_weight >= 0.95 else "Transition" if speed_weight > 0 else "Settled straight")
+            throttle = self.speed_plan.throttle(cmd.angle, self.cfg.max_steering, speed_weight, dt, cmd.error)
             if k is None:
                 # Geometry loss must never promote the car to straight speed.
                 throttle = min(throttle, self.speed_plan.corner)

@@ -1384,7 +1384,7 @@ function organizeWorkbench() {
   controls.innerHTML = '<div class="card-h"><h2>Drive tools</h2></div><p class="note">Use the Lap tuner section for guided speed steps and separate straight/curve tuning. The camera, controls and emergency STOP stay here.</p>';
   const lapCard = document.createElement('section'); lapCard.className = 'lap-tune card'; lapCard.innerHTML = `
     <h3>1 · Set throttle and target</h3>
-    <p class="note">Starting speed is 1.00 throttle (about PWM 407). This sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
+    <p class="note">Moving this control sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
     <div class="bigknob"><label for="lapSpeed">Whole-lap throttle <output id="lapSpeedReadout">1.00</output></label>
       <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="1.00" step="0.01" value="1.00" aria-label="Whole-lap speed value">
       <input id="lapSpeed" type="range" min="0.45" max="1.00" step="0.01" value="1.00" aria-label="Whole-lap speed">
@@ -1443,14 +1443,15 @@ function organizeWorkbench() {
     const buttons = card.querySelector('.row');
     moveKnob(name === 'straight' ? 'speed_straight' : 'speed_corner', card);
     const presets = document.createElement('div'); presets.className = 'row';
-    for (const [label, direction] of [['Start at 1.00', 'base'], ['Slower −step', 'down'], ['Faster +step', 'up']]) {
+    const baseline = name === 'straight' ? 1.00 : 0.60;
+    for (const [label, direction] of [[`Start at ${baseline.toFixed(2)}`, 'base'], ['Slower −step', 'down'], ['Faster +step', 'up']]) {
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = label;
       b.onclick = () => {
         const id = name === 'straight' ? 'speed_straight' : 'speed_corner';
         const limit = Math.min(knobVal('max_auto') ?? .6, knobVal('top_throttle') ?? .6);
         const step = +$('tuneSpeedStep').value;
         const current = Number(knobVal(id) || 1.00);
-        const speed = direction === 'base' ? Math.min(limit, 1.00)
+        const speed = direction === 'base' ? Math.min(limit, baseline)
           : Math.max(.45, Math.min(limit, +(current + (direction === 'up' ? step : -step)).toFixed(2)));
         const values = { [id]: speed };
         if (name === 'corner' && !(knobVal('speed_straight') > 0)) values.speed_straight = speed;

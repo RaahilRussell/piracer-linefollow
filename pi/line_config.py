@@ -7,7 +7,7 @@ default from linetrack/config.py, which was tuned on real stage frames.
 """
 
 # --- What to follow ---------------------------------------------------------
-TARGET_X_RATIO = 0.40      # left orange line's inside edge sits left-of-center; 0.80 = other side
+TARGET_X_RATIO = 0.46
 # Camera orientation is already set by ~/mycar's CAMERA_HFLIP / CAMERA_VFLIP; do not flip frames again here.
 LOOKAHEAD_RATIO = 0.62     # row (fraction of image height) where the error is measured
 
@@ -19,10 +19,10 @@ S_LO = 110
 LOOKAHEAD_FROM_POINTS = True   # steer from where the edge really is at the lookahead row
 
 # --- Steering (angle -1 = left, +1 = right) ----------------------------------
-KP = 3.5                   # was 2.2: corrected too gently and drifted off the mat (error 0.1 -> steer 0.35)
+KP = 4.0
 KD = 0.4                   # was 0.25
 STRAIGHT_KP = 4.0
-CORNER_KP = 5.0
+CORNER_KP = 4.5
 MAX_STEERING = 1.0
 STEERING_RATE_LIMIT = 3.0  # max change per second
 STEERING_SMOOTHING = 0.35  # EMA, 0 = none
@@ -82,8 +82,8 @@ MAX_EDGE_ROUGHNESS_PX = 2.5  # ragged-edged orange (wood grain, skin) is not tap
 # --- Lost-line behaviour ---------------------------------------------------------
 # Lost line: hold heading, keep rolling LOST_COAST_S, ramp down over LOST_SLOW_S, then stop.
 LOST_HOLD_HEADING = True
-LOST_COAST_S = 0.5
-LOST_SLOW_S = 0.5
+LOST_COAST_S = 0.0
+LOST_SLOW_S = 0.0
 
 # --- One line only = maybe the wrong line ----------------------------------------
 # With only one orange line identified, the pilot never speeds up; if that lasts
@@ -97,9 +97,9 @@ SINGLE_LINE_STOP_S = 2.5
 # down/up so a bend is entered progressively and the car only accelerates after curvature clears.
 # The auto-tuner fills straight/corner; transition defaults to their midpoint.
 SPEED_STRAIGHT = 1.00   # faster starting throttle for the Lap Tuner
-SPEED_TRANSITION = 1.00 # keep the handoff near the starting straight/curve speed
-SPEED_CORNER = 1.00     # faster starting throttle; lower independently if corners bog or run wide
-SPEED_RAMP_DOWN = 1.0    # throttle units / s when entering a bend
+SPEED_TRANSITION = 0.65
+SPEED_CORNER = 0.6
+SPEED_RAMP_DOWN = 2.0
 SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend
 
 # --- Auto-tuner (dashboard "Auto-tune": start slow, fix gains, step speed up) ------
