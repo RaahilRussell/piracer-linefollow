@@ -1397,6 +1397,7 @@ function organizeWorkbench() {
     <div class="row"><button class="btn primary" id="lapStart">Start full-circle lap</button><button class="btn danger" id="lapStop">Finish lap · stop & review</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
   const lapIntro = document.createElement('div'); lapIntro.className = 'card lap-page-intro';
   lapIntro.innerHTML = `<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Set the throttle for your next lap. Changes apply immediately in Full Auto.</p></div><a class="btn" href="#drive">Open drive controls</a></div>
+    <section class="lap-step-control" id="sectionGains"><h2>Steering response</h2></section>
     <form id="sectionSpeeds" class="lap-step-control"><h2>Section throttle</h2>
       <p id="sectionLimits" class="note">Reading car settings…</p>
       <div class="row"><label for="quickStraight">Straight · current <output id="nowStraight">—</output></label>
@@ -1457,7 +1458,7 @@ function organizeWorkbench() {
       }; presets.append(b);
     }
     card.append(presets);
-    card.append(makeKnob(name + '_kp', 'Steering strength · KP', 'Lower if it weaves; raise if it lags without reaching the steering limit.', 10, .1));
+    $('sectionGains').append(makeKnob(name + '_kp', name === 'straight' ? 'Straight KP' : 'Curve KP', 'Lower if it weaves; raise if it lags without reaching the steering limit.', 10, .1));
     card.append(makeKnob(name + '_kd', 'Damping · KD', 'Smooth the correction; reduce if steering chatters.', 2, .05));
     card.append(buttons);
   }
