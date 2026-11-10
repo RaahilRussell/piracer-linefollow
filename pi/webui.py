@@ -1081,6 +1081,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             if p == "/api/review":
                 return self._json(hub.review_action(body))
+            if p == "/api/lap-review":
+                import lap_tuning
+                return self._json(lap_tuning.assess_lap(body.get("samples"), body.get("speed")))
             if p == "/api/knobs":
                 return self._json({"applied": hub.apply(body)})
             if p == "/api/save":

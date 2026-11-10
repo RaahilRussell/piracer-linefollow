@@ -690,8 +690,15 @@ function drawLane(t) {
 
 /* ---------------- live telemetry ---------------- */
 const hist = []; let lastSeq = 0, lastTele = null;
+const lapTune = { active: false, samples: [], speed: 0, safeSpeed: null, run: 0, report: null };
 function onTele(items) {
-  for (const t of items) { hist.push(t); lastSeq = Math.max(lastSeq, t.seq); }
+  for (const t of items) {
+    hist.push(t); lastSeq = Math.max(lastSeq, t.seq);
+    if (lapTune.active && t.mode === 'local') {
+      lapTune.samples.push({t:t.t, status:t.status, found:!!t.found, error:t.error, steering:t.steering});
+      if (lapTune.samples.length > 10000) lapTune.samples.shift();
+    }
+  }
   const cut = (hist.length ? hist[hist.length - 1].t : 0) - 10;
   while (hist.length && hist[0].t < cut) hist.shift();
   lastTele = hist[hist.length - 1];
@@ -702,7 +709,9 @@ function updateTiles(t) {
   const staleVideo = $('videoStale');
   if (staleVideo) staleVideo.hidden = t.status !== 'STALE';
   const lapStatus = $('lapRunStatus');
-  if (lapStatus) lapStatus.textContent = t.mode === 'local'
+  if (lapStatus && lapTune.active) lapStatus.textContent = `Lap ${lapTune.run} · ${lapTune.samples.length} samples · ${t.status === 'TRACKING' ? 'tracking' : 'line lost'} · steering near limit is OK if the line stays tracked`;
+  else if (lapStatus && lapTune.report) lapStatus.textContent = lapTune.report.message;
+  else if (lapStatus) lapStatus.textContent = t.mode === 'local'
     ? `Full Auto · ${fmt(t.speed_target ?? t.throttle)} throttle · ${t.status === 'TRACKING' ? 'tracking' : 'line lost'}`
     : 'Stopped · Manual';
   const st = t.single_stop ? ['bad', 'Stopped: one line only'] : t.status === 'TRACKING' ? ['ok', t.source === 'right' ? 'Tracking (right-line backup)' : 'Tracking']
@@ -1339,18 +1348,20 @@ function organizeWorkbench() {
   checkDetails.append(diagnosis.firstElementChild);
 
   const sectionTune = drive.ownerDocument.querySelector('.section-tune');
-  controls.innerHTML = '<div class="card-h"><h2>One full lap at a time</h2></div><p class="note">Start at the slow rolling baseline, complete one circle, stop at the start mark, then raise the speed slider and repeat. PID and speed changes apply live in Full Auto.</p>';
+  controls.innerHTML = '<div class="card-h"><h2>One full lap at a time</h2></div><p class="note">Start slowly, complete one circle, and finish at the start mark. A clean lap stages the next run 0.03 faster; mixed tracking repeats the same speed; a clear failure stops the ladder. Steering can reach its limit and still count as a good lap when it keeps the line tracked.</p>';
   const lapCard = document.createElement('section'); lapCard.className = 'lap-tune card'; lapCard.innerHTML = `
-    <h3>1 · Set speed for the whole lap</h3>
+    <h3>1 · Set speed and target</h3>
     <p class="note">Slow baseline is 0.55 throttle (about PWM 390). Wheel motion may stop below roughly 0.45–0.55. Slider changes straight, transition and curve speed together.</p>
     <div class="bigknob"><label for="lapSpeed">Whole-lap speed <output id="lapSpeedReadout">0.55</output></label>
       <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed value">
       <input id="lapSpeed" type="range" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed">
       <span class="help" id="lapSpeedStatus">Applied to all three Full Auto speed sections. Manual throttle is controlled by the gamepad or touchpad.</span></div>
+    <p class="note">Lap target: left line at <b>0.46 of image width</b>, just left of center (0.50). It is a camera target, separate from where you place the car on the start mark. Start position stays yours to set.</p>
+    <div id="lapReview" class="note" aria-live="polite"></div>
     <div class="lap-pid"></div>
     <h3>2 · Run one circle, then stop</h3>
-    <p class="note">Put the car on the start mark with a clear circle ahead. Start only when the camera says TRACKING. Press stop yourself when it returns to the mark.</p>
-    <div class="row"><button class="btn primary" id="lapStart">Start slow full-circle lap</button><button class="btn danger" id="lapStop">Lap complete · stop</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
+    <p class="note">Place the car at your chosen start mark with a clear circle ahead. Start only when the camera says TRACKING. Press finish when it returns to that mark; the dashboard cannot reliably identify a lap boundary from camera frames alone.</p>
+    <div class="row"><button class="btn primary" id="lapStart">Start slow full-circle lap</button><button class="btn danger" id="lapStop">Finish lap · stop & review</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
   controls.append(lapCard);
   lapCard.querySelector('.lap-pid').append($('bk_kp').closest('.bigknob'), $('bk_kd').closest('.bigknob'));
   const sectionDetails = document.createElement('details'); sectionDetails.className = 'more';
@@ -1474,6 +1485,7 @@ function wireLapControls() {
   range.addEventListener('input', changed);
   number.addEventListener('input', changed);
   $('lapStart').onclick = async () => {
+    if (lapTune.active) return toast('Finish the current lap before starting another.');
     const speed = +range.value, cap = Math.min(knobVal('max_auto') ?? 0.6, knobVal('top_throttle') ?? 0.6);
     if (!src.live || !src.fresh) return toast('Car is disconnected or telemetry is stale.');
     if (lastTele?.status !== 'TRACKING' || !lastTele?.found) return toast('Line is not being tracked. Fix the camera view before starting a lap.');
@@ -1482,14 +1494,39 @@ function wireLapControls() {
     try {
       clearTimeout(lapSpeedTimer);
       await saveLapSpeed(speed);
+      const target = await api('/api/knobs', { target_x_ratio: 0.46 });
+      if (knobDef('target_x_ratio')) knobDef('target_x_ratio').value = target.applied.target_x_ratio;
+      syncBigKnobs();
+      lapTune.active = true; lapTune.samples = []; lapTune.speed = speed; lapTune.run += 1; lapTune.report = null;
+      $('lapReview').textContent = '';
       $('lapRunStatus').textContent = `Starting one lap at ${speed.toFixed(2)}…`;
       await api('/api/mode', { mode: 'local' });
-      toast(`Full Auto lap started at ${speed.toFixed(2)}. Press “Lap complete · stop” at the start mark.`);
-    } catch (e) { $('lapRunStatus').textContent = 'Stopped'; toast('Could not start lap: ' + e.message); }
+      toast(`Full Auto lap started at ${speed.toFixed(2)} with the target just left of center. Finish at your start mark.`);
+    } catch (e) { lapTune.active = false; $('lapRunStatus').textContent = 'Stopped'; toast('Could not start lap: ' + e.message); }
     finally { button.disabled = false; }
   };
   $('lapStop').onclick = async () => {
-    try { await api('/api/estop', {}); $('lapRunStatus').textContent = 'Stopped · Manual'; toast('Lap ended. Car stopped.'); }
+    if (!lapTune.active) return toast('Start a lap first.');
+    const samples = lapTune.samples.slice(), speed = lapTune.speed;
+    try {
+      await api('/api/estop', {}); lapTune.active = false;
+      const review = await api('/api/lap-review', { samples, speed }); lapTune.report = review;
+      let reportText = `Lap ${lapTune.run}: ${review.result.toUpperCase()} · ${review.samples} samples · tracking ${review.tracking_pct == null ? '—' : review.tracking_pct + '%'} · p90 line error ${review.error_p90 == null ? '—' : review.error_p90} · steering near limit ${review.steering_limit_pct == null ? '—' : review.steering_limit_pct + '%'} (not a failure by itself). ${review.message}`;
+      if (review.result === 'passed') lapTune.safeSpeed = speed;
+      if (review.result !== 'inconclusive' && review.result !== 'failed' && review.next_speed > speed) {
+        await saveLapSpeed(review.next_speed);
+      } else if (review.result === 'failed' && lapTune.safeSpeed != null) {
+        reportText += ` Last clean speed: ${lapTune.safeSpeed.toFixed(2)}.`;
+      }
+      $('lapReview').textContent = reportText;
+      $('lapRunStatus').textContent = review.message;
+      try {
+        const dx = await api('/api/diagnose');
+        const gainFix = (dx.issues || []).find(i => i.apply && (i.apply.kp != null || i.apply.kd != null));
+        if (gainFix) $('lapReview').textContent += ` PID suggestion: ${gainFix.apply_label || gainFix.fix} (${gainFix.evidence}). Review it in the PID sliders before the next lap.`;
+      } catch (_) { /* lap metrics are still useful if diagnosis is unavailable */ }
+      toast('Lap stopped. Review the result and staged speed before starting again.');
+    }
     catch (e) { toast('Stop request failed: ' + e.message); }
   };
   syncLapSpeed();
