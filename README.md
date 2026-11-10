@@ -1,146 +1,100 @@
 # PiRacer line follower
 
-A Waveshare PiRacer Pro that races the orange Waveshare mat on its own, using one fisheye camera, OpenCV and no neural network. It follows the **inside (left) orange line, counter-clockwise**, for the ESE 1110 race: 10 laps, +5 s per off-track, +10 s per manual reposition.
+A Waveshare PiRacer Pro follows the inside orange tape counter-clockwise around the ESE 1110 race mat. One fisheye camera supplies both the steering target and the preview used to slow down for bends. The race is scored over ten laps, with five seconds added for leaving the track and ten for a manual reposition.
 
-> **AI agents / new teammates:** read [`CHANGELOG.md`](CHANGELOG.md) first (what changed, why, and what is still unverified), then [`HANDOFF.md`](HANDOFF.md) for the rules (no Pi writes, deploys or pushes without the owner's OK).
+The current race controller uses **pure pursuit for steering geometry and PD for a small visual correction**. The Race preset completed a nominal simulated lap in **3.69 s**. The November 10 controller still needs a timed run on the physical car.
 
----
+## Open the dashboard
 
-## Race day: four commands
-
-```bash
-git clone https://github.com/RaahilRussell/piracer-linefollow.git   # first time only
-cd piracer-linefollow
-./car.sh pull     # latest code from GitHub + a full check of the exact files the car will get (no Pi needed)
-./car.sh          # finds the Pi, installs if anything changed, starts the program, opens the dashboard
-```
-
-The car starts in **Manual** mode. **Nothing moves until you drive it or choose Full Auto.** On the dashboard:
-
-1. **Measure the camera once.** Measure the lens-centre height above the floor with a ruler, and the tilt with a phone level held on the camera board. Enter both on the **Camera height** and **Camera tilt** sliders, then **Save on car**. These are the biggest unknowns: the defaults (0.12 m, 15°) are estimates.
-2. Press **First slow lap**, switch to Full Auto, and watch two laps.
-3. Press **Race**. That's the race setup.
-4. If it runs wide, press **Safe race**. If the steering itself misbehaves (weaving, steering the wrong way), press **PD fallback**.
-
-**Stopping:** gamepad **Y** is the emergency stop, **X** quits the program, **A** cycles the mode. The dashboard has **STOP** (Space key). The physical switch cuts battery power.
-
----
-
-## First-time setup on a new Mac
+**On your Mac**, run the simulator to try the dashboard and watch how steering and throttle change around the track.
 
 ```bash
 python3 -m pip install -r requirements.txt -r requirements-test.txt
+python3 pi/sim_dashboard.py --sim 8893
 ```
 
-- **SSH key:** copy `~/.ssh/id_piracer` (and its `.pub`) from the Mac that set up the car. The Pi only accepts this key. Never type or send the Pi's password anywhere.
-- **Same Wi-Fi:** the Mac must be on the same Wi-Fi as the Pi. `./car.sh` finds it by its SSH identity even when its IP changes.
-- **Check:** run `./car.sh check`. It prints `ready` or tells you exactly what's missing.
+Open [the local dashboard](http://localhost:8893/). Its source indicator identifies the simulator. On the Pi, the same root page serves the Lap Tuner and `/classic` opens the detailed telemetry dashboard.
 
----
-
-## `./car.sh`: everything for the real car
-
-| Command | What it does |
-|---|---|
-| `./car.sh` | Find the Pi, deploy if the code changed, start the program, open the dashboard, stay attached (Ctrl-C only detaches) |
-| `./car.sh pull` | `git pull` the latest `main`, then a quick check |
-| `./car.sh check` | No Pi needed: git state, SSH key, **the exact bundle the car gets** (built and imported on the Mac), the tests |
-| `./car.sh check --quick` | Same, without the tests |
-| `./car.sh restart` | Stop the program, install the new version, start again (use after `pull` while it's running) |
-| `./car.sh status` | Is the Pi up, is the program running, which version is installed |
-| `./car.sh stop` / `open` / `log` / `ssh` / `find` | Stop the program · open the dashboard · follow its output · shell on the Pi · just find the Pi |
-
-**Safeguards built in:**
-- **Bundle check:** `./deploy.sh` builds the exact bundle on the Mac and imports it before anything reaches the Pi. A missing file fails here, not on the car.
-- **No mid-run installs:** it refuses to install over a running drive program.
-- **No writes outside `~/linefollow`:** it never writes anywhere else on the Pi, and checks that `~/mycar` (the car's own calibration) is unchanged.
-- **Stale settings are set aside:** settings saved with **Save on car** only apply if they were saved under the same `line_config.py` defaults. After a pull that changes the defaults, the old `tuning.json` is moved aside (`tuning.json.stale-…`) and the new defaults take effect.
-
----
-
-## The dashboard presets
-
-All values come from [`pi/line_config.py`](pi/line_config.py); the page has no numbers of its own. Lap times are **simulated**: the throttle-to-speed table is assumed, so the lap timer on the car is the real number.
-
-| Preset | Straight / curve throttle | Simulated lap | Use it for |
-|---|---|---|---|
-| **Race** | 1.00 / 0.90 | 3.7 s | The race. Passes all 21 simulated "what if we guessed wrong" variations, including two wrong at once |
-| **Safe race** | 0.92 / 0.86 | 4.1 s | If Race runs wide on the real car |
-| **First slow lap** | 0.75 / 0.70 | ~6.7 s | First laps of the day (the speed the car has already driven) |
-| **PD fallback** | 0.75 / 0.70, PD steering | ~6.7 s | If pure pursuit itself misbehaves |
-
-The **Lap Tuner** page (`/`) can also climb speed lap by lap, hold each section at its limit, and time a 10-lap race with penalties. `/classic` is the older full dashboard.
-
----
-
-## How it drives
-
-```
-camera frame (OV5647 fisheye, 20 fps, 240x192)
-  -> orange-line detector         linetrack/detector.py    inside edge of the left line, right line as backup
-  -> ground projection            linetrack/geometry.py    pixels -> metres (camera 0.12 m high, 15 deg down)
-  -> pure pursuit                 pi/donkey_part.py        aim at the ride line Ld = 0.55 m + 0.30 s * speed ahead
-       + delay compensation                                aim from where the car will be 0.15 s later
-       + small PD correction                               10% of KP/KD in image space
-  -> speed plan                   pi/donkey_part.py        straight / transition / curve throttle by measured curvature
-  -> steering servo + motor       DonkeyCar (~/mycar, read-only)
-```
-
-**Safety in the loop:**
-- **Stale frame:** no throttle if the frame is older than 0.35 s.
-- **Line lost:** it coasts 0.5 s holding its heading, then slows to a stop.
-- **Unsure which line:** if it can't tell which line it's on for 2.5 s, it stops.
-- **Gamepad wins:** the gamepad always overrides Full Auto.
-
-### The settings that matter most
-
-| Setting (`pi/line_config.py`) | Now | Why |
-|---|---|---|
-| `CAM_HEIGHT_M`, `CAM_PITCH_DEG` | 0.12 m, 15° | Pure pursuit aims through these. Too high or too flat makes it run wide. **Measure them.** |
-| `PURSUIT_PREDICT_S` | 0.15 s | Delay compensation. Matches the ~150 ms command-to-motion lag in real logs. 0 turns it off |
-| `TARGET_X_RATIO` | 0.40 | Where the line's inside edge sits in the image. Higher = closer to the inside line |
-| `PURSUIT_LD_M`, `PURSUIT_LD_GAIN_S` | 0.55 m, 0.30 s | Lookahead. Shorter fails with delay; longer cuts corners |
-| `STEERING_RATE_LIMIT` | 6 /s | At 3 the car fell behind in tight curves at race pace |
-| `RACE_SPEED_*`, `SAFE_SPEED_*` | 1.00/0.95/0.90, 0.92/0.89/0.86 | The Race and Safe race presets |
-| `MAX_STEERING` | 1.0 | Full lock. At 0.8 the real car lost the line in the tightest curves |
-
-Every one of these is also a dashboard slider that changes the running car on the next frame.
-
----
-
-## Simulator and tests (Mac, no car)
+**For the car**, connect the Mac to the Pi's Wi-Fi network and use the configured SSH key. From the repository root:
 
 ```bash
-python3 -B -m unittest discover -s tests -q   # 231 tests
-python3 tools/race_eval.py --pairs            # race values x 21 physics variations (grip, delay, camera, speed...)
-python3 tools/race_eval.py --speeds 0.96/0.89 --pairs --set pursuit_predict_s=0   # try other values
-python3 pi/sim_dashboard.py --sim 8893        # the real dashboard driving a simulated car: http://localhost:8893
-python3 -m sim view                           # 2D simulator: http://localhost:8892
-python3 -m sim params                         # which car values are verified / estimated / assumed
+./car.sh pull     # update main and check the deployment bundle locally
+./car.sh check    # check the bundle, dependencies, SSH key and tests
+./car.sh          # find the Pi, install if needed, start the dashboard
 ```
 
-What the simulator knows:
-- **Verified or measured:** wheelbase, size, camera FOV, the track (traced from Waveshare's to-scale mat), the processing time.
-- **Estimated:** camera mount, 18° full-lock steering angle (fitted to recorded runs).
-- **Assumed:** throttle → speed table, grip, servo speed.
+The program starts in Manual. Measure the lens height and camera pitch, enter them on the dashboard, and save them on the car. Place the car at the start mark, check that the overlay follows the inside edge, select **First slow lap**, then choose **Full Auto** when ready. Dashboard **STOP** or Space returns to Manual with zero throttle. On the gamepad, A cycles modes, Y is the emergency stop, and X quits the program.
 
-`race_eval` therefore tests every setup with each assumed value moved across its plausible range. Treat simulated lap times as relative, not absolute. To replace assumptions with measurements, see [`sim/CALIBRATION.md`](sim/CALIBRATION.md).
+## How the steering evolved
 
-**Replay real recordings:** `python3 tools/backtest.py --frames-dir runs/<run> --dt 0.05`. It replays the detector and pilot on recorded frames. That shows tracking, not counterfactual lap times.
+### 1. Follow the edge with PD
 
----
+OpenCV identifies the orange boundaries and tracks which one is on the left. The pilot normally follows the inside edge of the left tape. When it uses the right boundary as backup, it accounts for the lane width. The original controller reduced that view to one measurement: where the tracked edge crossed a row 62% down the image.
 
-## Repository map
+Let `x` be that horizontal position divided by image width. With a target of 0.40, an edge measured at 0.45 gives an error of +0.05. At KP 3.5 the proportional term asks for +0.175 steering, to the right. The derivative term responds to how fast the error is changing. The code filters it so a one-frame shift in the detected edge has less influence:
 
-| Path | What |
-|---|---|
-| `car.sh`, `deploy.sh` | Everything for the real car (Mac side) |
-| `pi/` | Runs on the Pi: `drive_line.py` (launcher), `line_config.py` (**all settings**), `donkey_part.py` (pilot + detector part), `webui.py` + `laptuner.html` + `dashboard.html` (dashboard), `autotune.py` / `lap_tuning.py` (lap tuner, lap timer) |
-| `linetrack/` | Detector, PD controller, geometry (ground projection, pure pursuit, delay compensation). Shared by car, simulator and tests |
-| `sim/` | Vehicle, camera and track simulator. `profile.json` holds every physical value with its source and status |
-| `tools/` | `race_eval.py` (race check), `simdrive.py`, `sim_limits.py`, `calibrate_sim.py`, `calibrate_camera.py`, `backtest*.py` |
-| `tests/` | Unit and simulator tests |
-| `CHANGELOG.md` | What changed and why, newest first, including the comparison with Nov 9 evening |
-| `HANDOFF.md` | Session handoff and rules for agents working on the car |
+```text
+error       = x − target
+derivative  = 0.6 × previous_derivative + 0.4 × (error − previous_error) / dt
+PD command  = KP × error + KD × derivative
+```
 
-**Undo everything on the Pi:** `rm -rf ~/linefollow`. Nothing outside that folder is ever written.
+The first derivative sample after a tracking gap is zero. Steering commands are clipped, smoothed and rate limited before reaching the servo. There is no integral term. [Steering implementation](linetrack/controller.py)
+
+This worked well enough to drive real laps. The difficult case was entering a semicircle. A straight and a bend can put the tape at the same place on the measurement row while requiring different wheel angles. Separate straight and curve gains let the PD controller react harder once the error grew. Later revisions also used curvature to slow the car on entry. Steering still depended on the image error to build the turn. [November 9 controller history](CHANGELOG.md)
+
+### 2. Aim at a point on the path ahead
+
+Pure pursuit uses the **shape of the visible edge**. The pilot projects edge pixels onto the floor through the camera model. It offsets those points along the local normal to the tape, producing the path the rear axle should follow. That offset is what lets the car drive beside the tape around a circle.
+
+The pilot chooses a goal on that path at a distance of **0.55 m + 0.30 s × estimated speed** from the rear axle. Speed comes from the previous throttle command and the model's speed table. If the tape disappears around a tight bend before reaching the requested distance, the pilot can use the farthest usable point.
+
+For a goal at `(x, y)` metres in the vehicle frame, with x forward and y left, the curvature of the arc from the rear axle to the goal is `2y / (x² + y²)`. The required front-wheel angle is `atan(wheelbase × curvature)`. The pilot converts this angle to the servo's sign and command scale using a 0.1741 m wheelbase and an estimated 18° wheel angle at full lock. [Goal selection and steering geometry](linetrack/geometry.py)
+
+On an ideal circular path, that construction returns the circle's curvature even when the car is already exactly on its intended path. The car can therefore hold a turn with near-zero image error. On a straight, a centered goal directly ahead gives zero curvature. Both behaviors follow from the same steering calculation.
+
+### 3. Account for delay and correct the remaining error
+
+At race pace the car moves between capturing the image and getting a response from the wheels. The pilot predicts **0.15 s** of motion at the estimated speed and current commanded wheel angle, then expresses the goal relative to that predicted pose. This matters most on entry and exit, where the needed wheel angle changes quickly.
+
+The camera mount and steering calibration are approximate, so the pilot also checks the edge position in the image. In a curve it uses the model's expected edge position when available, reducing the tendency to add a second correction for a turn already handled by pursuit. The default command before output limiting is:
+
+```text
+steering = pursuit command + 0.10 × (KP × image error + KD × filtered derivative)
+```
+
+With KP 3.5 and KD 0.4, the effective visual gains during pursuit are 0.35 and 0.04. If an edge is tracked but its projected points cannot produce a goal, the controller uses full PD for that frame. An entirely lost line or stale frame goes through the pilot's motion safeguards. [Pilot and fallback logic](pi/donkey_part.py) · [Car settings](pi/line_config.py)
+
+## Straight speed, curve entry and race presets
+
+Throttle is scheduled separately from steering. A bend visible ahead can reduce the target before the wheels have turned far. The planner blends the straight, transition and curve targets, also slowing for a large tracking correction. It limits the rate of change and waits for a confirmed straight before returning to full straight throttle.
+
+| Dashboard preset | Straight | Transition | Curve | Purpose |
+|---|---:|---:|---:|---|
+| First slow lap | 0.75 | 0.75 | 0.70 | Check camera alignment and whether the car completes the bend |
+| Race | 1.00 | 0.95 | 0.90 | Fastest preset validated in the documented simulation sweep |
+| Safe race | 0.92 | 0.89 | 0.86 | Lower pace if the car runs wide |
+| PD fallback | 0.75 | 0.75 | 0.70 | Compare steering against the earlier PD controller |
+
+These numbers are throttle commands. Actual lap speed depends on the battery, motor, grip and steering under load. For a curve that runs wide, check the overlay and section reading at entry. If the edge is correct but the projected goal is misplaced, check camera height and pitch first. The defaults of **0.12 m** and **15°** are estimates.
+
+## What has been verified
+
+The repository's historical comparison reports 8.40 s per simulated lap for the November 9 section-PD setup and about 3.7 s for the November 10 Race setup. Those runs used each revision's own throttle profile, camera model and steering settings. The improvement measures the whole setup. The comparison does not isolate how many seconds pure pursuit contributed. [Comparison and evidence](CHANGELOG.md)
+
+The Race evaluation uses three seeds, 30 simulated seconds per seed and 21 variations, including combinations of grip, servo response and delay. The November 10 local run recorded **3.69 s nominal**, **4.32 s in the slowest variation**, and zero wide or deep-inside failures. The scorer permits riding over the inside line within its 0.10 m tolerance and reports inside-line overlap separately. A real lap timer and the race judge determine the physical result. [Evaluation criteria](tools/race_eval.py) · [Scoring implementation](tools/simdrive.py)
+
+```bash
+python3 -B -m unittest discover -s tests -q
+python3 tools/race_eval.py --pairs
+python3 -m sim params
+python3 tools/backtest.py --frames-dir runs/<run> --dt 0.05
+```
+
+Replay checks the detector and steering decisions against previously recorded images. A different steering command would have changed the next image, so use closed-loop simulation to compare lap times and a physical trial to validate the model. The speed table, grip and camera mount are especially important measurements. [Calibration guide](sim/CALIBRATION.md)
+
+## Working on the car
+
+`./car.sh status` reports the running program and installed version. Use `./car.sh restart` to install an update during a planned stop, `./car.sh log` to follow the output and `./car.sh stop` to quit. Deployment checks the exact bundle locally and refuses to install over a running drive program. The application lives in `~/linefollow` on the Pi. If a revision changes the defaults, incompatible saved tuning is moved aside so an old setting cannot silently override the new setup.
+
+Start with the [changelog](CHANGELOG.md) for measured results and the [handoff](HANDOFF.md) for session and deployment rules. The [detector](linetrack/detector.py), [pilot](pi/donkey_part.py), [dashboard server](pi/webui.py) and [simulator](sim/) are the main entry points for development.
