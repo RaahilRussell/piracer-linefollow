@@ -21,7 +21,9 @@ LOOKAHEAD_FROM_POINTS = True   # steer from where the edge really is at the look
 # --- Steering (angle -1 = left, +1 = right) ----------------------------------
 KP = 3.5                   # was 2.2: corrected too gently and drifted off the mat (error 0.1 -> steer 0.35)
 KD = 0.4                   # was 0.25
-MAX_STEERING = 0.8
+STRAIGHT_KP = 4.0
+CORNER_KP = 5.0
+MAX_STEERING = 1.0
 STEERING_RATE_LIMIT = 3.0  # max change per second
 STEERING_SMOOTHING = 0.35  # EMA, 0 = none
 INVERT_STEERING = False    # if the lifted-wheels test is mirrored, flip THIS (never the PWM calibration)
@@ -94,14 +96,14 @@ SINGLE_LINE_STOP_S = 2.5
 # Curvature drives the handoff: straight -> transition -> corner. The plan slews throttle
 # down/up so a bend is entered progressively and the car only accelerates after curvature clears.
 # The auto-tuner fills straight/corner; transition defaults to their midpoint.
-SPEED_STRAIGHT = 0.70   # faster starting throttle for the Lap Tuner
-SPEED_TRANSITION = 0.70 # keep the handoff near the starting straight/curve speed
-SPEED_CORNER = 0.70     # faster starting throttle; lower independently if corners bog or run wide
+SPEED_STRAIGHT = 1.00   # faster starting throttle for the Lap Tuner
+SPEED_TRANSITION = 1.00 # keep the handoff near the starting straight/curve speed
+SPEED_CORNER = 1.00     # faster starting throttle; lower independently if corners bog or run wide
 SPEED_RAMP_DOWN = 1.0    # throttle units / s when entering a bend
 SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend
 
 # --- Auto-tuner (dashboard "Auto-tune": start slow, fix gains, step speed up) ------
-AUTOTUNE_START = 0.70      # faster initial Lap Tuner speed
+AUTOTUNE_START = 1.00      # faster initial Lap Tuner speed
 AUTOTUNE_STEP = 0.08       # speed added after each healthy window
 AUTOTUNE_WINDOW_S = 10.0   # driving judged per step (about 1-2 laps)
 

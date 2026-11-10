@@ -1384,10 +1384,10 @@ function organizeWorkbench() {
   controls.innerHTML = '<div class="card-h"><h2>Drive tools</h2></div><p class="note">Use the Lap tuner section for guided speed steps and separate straight/curve tuning. The camera, controls and emergency STOP stay here.</p>';
   const lapCard = document.createElement('section'); lapCard.className = 'lap-tune card'; lapCard.innerHTML = `
     <h3>1 · Set throttle and target</h3>
-    <p class="note">Starting speed is 0.70 throttle (about PWM 396). This sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
-    <div class="bigknob"><label for="lapSpeed">Whole-lap throttle <output id="lapSpeedReadout">0.70</output></label>
-      <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="1.00" step="0.01" value="0.70" aria-label="Whole-lap speed value">
-      <input id="lapSpeed" type="range" min="0.45" max="1.00" step="0.01" value="0.70" aria-label="Whole-lap speed">
+    <p class="note">Starting speed is 1.00 throttle (about PWM 407). This sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
+    <div class="bigknob"><label for="lapSpeed">Whole-lap throttle <output id="lapSpeedReadout">1.00</output></label>
+      <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="1.00" step="0.01" value="1.00" aria-label="Whole-lap speed value">
+      <input id="lapSpeed" type="range" min="0.45" max="1.00" step="0.01" value="1.00" aria-label="Whole-lap speed">
       <span class="help" id="lapSpeedStatus">Applied to all three Full Auto speed sections. Manual throttle is controlled by the gamepad or touchpad.</span></div>
     <p class="note">Lap target: left line at <b>0.46 of image width</b>, just left of center (0.50). It is a camera target, separate from where you place the car on the start mark. Start position stays yours to set.</p>
     <div id="lapReview" class="note" aria-live="polite"></div>
@@ -1442,14 +1442,14 @@ function organizeWorkbench() {
     const buttons = card.querySelector('.row');
     moveKnob(name === 'straight' ? 'speed_straight' : 'speed_corner', card);
     const presets = document.createElement('div'); presets.className = 'row';
-    for (const [label, direction] of [['Start at 0.70', 'base'], ['Slower −step', 'down'], ['Faster +step', 'up']]) {
+    for (const [label, direction] of [['Start at 1.00', 'base'], ['Slower −step', 'down'], ['Faster +step', 'up']]) {
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = label;
       b.onclick = () => {
         const id = name === 'straight' ? 'speed_straight' : 'speed_corner';
         const limit = Math.min(knobVal('max_auto') ?? .6, knobVal('top_throttle') ?? .6);
         const step = +$('tuneSpeedStep').value;
-        const current = Number(knobVal(id) || .70);
-        const speed = direction === 'base' ? Math.min(limit, .70)
+        const current = Number(knobVal(id) || 1.00);
+        const speed = direction === 'base' ? Math.min(limit, 1.00)
           : Math.max(.45, Math.min(limit, +(current + (direction === 'up' ? step : -step)).toFixed(2)));
         const values = { [id]: speed };
         if (name === 'corner' && !(knobVal('speed_straight') > 0)) values.speed_straight = speed;
@@ -1531,7 +1531,7 @@ function syncLapSpeed() {
   const cap = Math.min(knobVal('max_auto') ?? 1, knobVal('top_throttle') ?? 1, 1);
   const current = [knobVal('speed_straight'), knobVal('speed_transition'), knobVal('speed_corner')]
     .filter(v => v != null && +v > 0).map(Number);
-  const value = Math.min(cap, current.length ? Math.min(...current) : 0.70);
+  const value = Math.min(cap, current.length ? Math.min(...current) : 1.00);
   range.max = number.max = Math.max(0.45, cap).toFixed(2);
   range.value = number.value = Math.min(Math.max(value, 0.45), +range.max).toFixed(2);
   $('lapSpeedReadout').textContent = range.value;
@@ -1579,7 +1579,7 @@ function wireLapControls() {
   const stepRange = $('tuneSpeedStep'), stepReadout = $('tuneSpeedStepReadout');
   stepRange.addEventListener('input', () => { stepReadout.textContent = (+stepRange.value).toFixed(2); });
   const changed = event => {
-    const value = Math.min(+range.max, Math.max(+range.min, +event.currentTarget.value || 0.70));
+    const value = Math.min(+range.max, Math.max(+range.min, +event.currentTarget.value || 1.00));
     range.value = number.value = value.toFixed(2);
     $('lapSpeedReadout').textContent = value.toFixed(2);
     clearTimeout(lapSpeedTimer);
@@ -1633,7 +1633,7 @@ function wireLapControls() {
     catch (e) { toast('Stop request failed: ' + e.message); }
   };
   syncLapSpeed();
-  const baseline = Math.min(0.70, +range.max);
+  const baseline = Math.min(1.00, +range.max);
   range.value = number.value = baseline.toFixed(2);
   $('lapSpeedReadout').textContent = baseline.toFixed(2);
 }
