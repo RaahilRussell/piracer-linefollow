@@ -228,6 +228,9 @@ canvas.chart { width: 100%; height: 168px; display: block; }
 .lap-step-control label { font-weight:600; }
 .lap-step-control output { font-family:var(--mono); color:var(--target); }
 .lap-step-control input[type=range] { width:100%; accent-color:var(--tape); min-height:24px; }
+.lap-camera-slot { margin: 12px 0 18px; }
+.lap-camera-slot .card { margin: 0; }
+.lap-camera-slot .video { max-height: 48vh; }
 .lap-workflow-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%, 420px),1fr)); gap:14px; align-items:start; }
 .lap-workflow-grid > .card { margin:0; min-width:0; }
 .both-tuner { display:grid; gap:12px; align-content:start; }
@@ -525,7 +528,7 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
       <label><input type="radio" name="strat" value="max_speed"><b>Max speed</b><span class="note">Keeps your KP/KD and only climbs speed until it isn't healthy.</span></label>
       <label><input type="radio" name="strat" value="zn"><b>Ziegler–Nichols <span class="badge warn plain">Cross-check</span></b><span class="note">KD 0, raises KP until a steady weave (deliberately!), then KP = 0.8·Ku, KD = KP·Tu/8 and verifies. Needs about 0.8 throttle to weave; aborts if it loses the line. Have STOP ready.</span></label>
     </div>
-    <div class="row"><label for="atCeil">Never faster than</label><input class="field" type="number" id="atCeil" min="0.5" max="0.60" step="0.01" value="0.60"><span class="note" id="atCeilPwm"></span></div>
+    <div class="row"><label for="atCeil">Never faster than</label><input class="field" type="number" id="atCeil" min="0.5" max="0.80" step="0.01" value="0.80"><span class="note" id="atCeilPwm"></span></div>
     <div class="row" id="atSpeedRow"><label for="atSpeed">Test speed</label><input class="field" type="number" id="atSpeed" min="0.5" max="1" step="0.01" value="" placeholder="auto"><span class="note" id="atSpeedNote"></span></div>
     <div class="row"><button class="btn primary" id="atStart">Run the slow → medium → safe max tune</button><button class="btn" id="atStop">Stop now</button><button class="btn" id="atKeep" disabled>Keep Result</button><button class="btn" id="atSave" disabled>Save as Car-Verified Profiles</button></div>
     <p class="note" id="atMsg"></p>
@@ -624,6 +627,7 @@ function route() {
   if (v === 'tune') { renderTuneProfiles(); schedulePreview(); }
   if (v === 'laptune') syncLapSpeed();
   if (v === 'simulator') simEnter();
+  if (window.syncLapCamera) window.syncLapCamera();
   drawLive();
 }
 addEventListener('hashchange', route);
@@ -759,7 +763,7 @@ function updateTiles(t) {
   document.querySelectorAll('#modeSeg button').forEach(b => { const on = b.dataset.mode === t.mode; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
 }
 function drawLive() {
-  if (view() !== 'drive' && view() !== '') return;
+  if (view() !== 'drive' && view() !== '' && view() !== 'laptune') return;
   drawLane(src.fresh ? lastTele : null);
   if (!hist.length) return;
   const t1 = hist[hist.length - 1].t, xs = hist.map(h => (h.t - (t1 - 10)) / 10);
@@ -904,7 +908,7 @@ function schedFor(thr) {
 function currentSpeed() {
   if (lastTele && src.fresh && lastTele.mode === 'local' && (lastTele.throttle || 0) > 0.3) return +lastTele.throttle.toFixed(2);
   const plan = knobVal('speed_straight'); if (plan) return plan;
-  return knobVal('max_auto') ?? 0.6;
+  return knobVal('max_auto') ?? 0.8;
 }
 function renderTuneProfiles() {
   const rows = profRows(); const spd = currentSpeed(); const s = schedFor(spd);
@@ -1365,6 +1369,8 @@ function organizeWorkbench() {
   const hero = drive.querySelector('.hero');
   live.append(hero.firstElementChild);
   const camera = live.firstElementChild;
+  const cameraHome = document.createComment('live camera position');
+  camera.before(cameraHome);
   camera.append(hero.querySelector('.readouts'));
   const liveFacts = document.createElement('dl'); liveFacts.className = 'facts';
   for (const id of ['tSection', 'tSpeedTarget', 'tLim', 'tGains']) liveFacts.append($(id).parentElement);
@@ -1378,25 +1384,32 @@ function organizeWorkbench() {
   controls.innerHTML = '<div class="card-h"><h2>Drive tools</h2></div><p class="note">Use the Lap tuner section for guided speed steps and separate straight/curve tuning. The camera, controls and emergency STOP stay here.</p>';
   const lapCard = document.createElement('section'); lapCard.className = 'lap-tune card'; lapCard.innerHTML = `
     <h3>1 · Set throttle and target</h3>
-    <p class="note">Slow baseline is 0.55 throttle (about PWM 390). This sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
-    <div class="bigknob"><label for="lapSpeed">Whole-lap throttle <output id="lapSpeedReadout">0.55</output></label>
-      <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed value">
-      <input id="lapSpeed" type="range" min="0.45" max="0.60" step="0.01" value="0.55" aria-label="Whole-lap speed">
+    <p class="note">Starting speed is 0.70 throttle (about PWM 396). This sets one throttle target for straight, transition and curve sections. Use the separate controls below to give straights and curves different throttle.</p>
+    <div class="bigknob"><label for="lapSpeed">Whole-lap throttle <output id="lapSpeedReadout">0.70</output></label>
+      <input class="field" id="lapSpeedNumber" type="number" min="0.45" max="0.80" step="0.01" value="0.70" aria-label="Whole-lap speed value">
+      <input id="lapSpeed" type="range" min="0.45" max="0.80" step="0.01" value="0.70" aria-label="Whole-lap speed">
       <span class="help" id="lapSpeedStatus">Applied to all three Full Auto speed sections. Manual throttle is controlled by the gamepad or touchpad.</span></div>
     <p class="note">Lap target: left line at <b>0.46 of image width</b>, just left of center (0.50). It is a camera target, separate from where you place the car on the start mark. Start position stays yours to set.</p>
     <div id="lapReview" class="note" aria-live="polite"></div>
     <div class="lap-pid"></div>
     <h3>2 · Run one circle, then stop</h3>
     <p class="note">Place the car at your chosen start mark with a clear circle ahead. Start only when the camera says TRACKING. Press finish when it returns to that mark; the dashboard cannot reliably identify a lap boundary from camera frames alone.</p>
-    <div class="row"><button class="btn primary" id="lapStart">Start slow full-circle lap</button><button class="btn danger" id="lapStop">Finish lap · stop & review</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
+    <div class="row"><button class="btn primary" id="lapStart">Start full-circle lap</button><button class="btn danger" id="lapStop">Finish lap · stop & review</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
   const lapIntro = document.createElement('div'); lapIntro.className = 'card lap-page-intro';
-  lapIntro.innerHTML = `<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Set straight and curve throttle separately, then let Tune both raise them after clean passes. STOP remains available in the header.</p></div><a class="btn" href="#drive">Open live camera &amp; controls</a></div>
-    <div class="lap-step-control"><label for="tuneSpeedStep">Throttle increase after each clean step <output id="tuneSpeedStepReadout">0.05</output></label>
-      <input id="tuneSpeedStep" type="range" min="0.01" max="0.12" step="0.01" value="0.05" aria-label="Throttle increase after each clean step">
-      <p class="note">Used by both workflows. Each passed step raises straight, transition and curve throttle by this amount. Make bigger jumps for speed, or smaller jumps near the limit.</p></div>`;
+  lapIntro.innerHTML = `<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Starting throttle is 0.70 for straights, transition and curves. Adjust the two sections independently, then raise them after clean passes. STOP remains available in the header.</p></div><a class="btn" href="#drive">Open drive controls</a></div>
+    <div class="lap-step-control"><label for="tuneSpeedStep">Throttle increase after each clean step <output id="tuneSpeedStepReadout">0.08</output></label>
+      <input id="tuneSpeedStep" type="range" min="0.01" max="0.12" step="0.01" value="0.08" aria-label="Throttle increase after each clean step">
+      <p class="note">Used by both workflows. Each passed step raises straight, transition and curve throttle by this amount. Make bigger jumps for speed, or smaller jumps near the limit.</p></div>
+    <div class="lap-camera-slot" id="lapCameraSlot" aria-label="Live camera while tuning"></div>`;
   const lapSteps = document.createElement('div'); lapSteps.className = 'lap-workflow-grid';
   lapSteps.append(lapCard);
   laptune.append(lapIntro, lapSteps);
+  window.syncLapCamera = () => {
+    const slot = $('lapCameraSlot');
+    if (!slot) return;
+    if (view() === 'laptune') slot.append(camera);
+    else cameraHome.after(camera);
+  };
   lapCard.querySelector('.lap-pid').append($('bk_kp').closest('.bigknob'), $('bk_kd').closest('.bigknob'));
   const sectionDetails = document.createElement('section'); sectionDetails.className = 'card both-tuner';
   sectionDetails.innerHTML = '<div class="card-h"><div><h2>Tune straight + curve automatically</h2><p class="note">Learns separate steering gains and raises real throttle for faster laps.</p></div></div><ol class="tuner-steps"><li>Set <b>Straight throttle</b> and <b>Curve throttle</b> below. Raise curve throttle if it bogs down there.</li><li>Start in <b>Full Auto</b>, place the car on the track, then press <b>Tune both automatically</b> and confirm.</li><li>It checks both sections. When both pass, it raises each throttle target by the selected step and checks again, up to the Full Auto cap.</li><li>If a step is too slow (motor bogging) or too fast, press <b>Step failed · stop &amp; keep last good</b>. It stops and returns to the last passing throttle and gains. Then raise the relevant throttle if it was bogging, or lower it if it was too fast.</li></ol><p class="note tuner-warning">The car moves during this trial. Keep the track clear and STOP if its path looks unsafe. Near-limit steering is acceptable while it keeps the line tracked.</p>';
@@ -1422,14 +1435,14 @@ function organizeWorkbench() {
     const buttons = card.querySelector('.row');
     moveKnob(name === 'straight' ? 'speed_straight' : 'speed_corner', card);
     const presets = document.createElement('div'); presets.className = 'row';
-    for (const [label, direction] of [['Slow baseline', 'base'], ['Slower −step', 'down'], ['Faster +step', 'up']]) {
+    for (const [label, direction] of [['Start at 0.70', 'base'], ['Slower −step', 'down'], ['Faster +step', 'up']]) {
       const b = document.createElement('button'); b.className = 'btn small'; b.textContent = label;
       b.onclick = () => {
         const id = name === 'straight' ? 'speed_straight' : 'speed_corner';
         const limit = Math.min(knobVal('max_auto') ?? .6, knobVal('top_throttle') ?? .6);
         const step = +$('tuneSpeedStep').value;
-        const current = Number(knobVal(id) || .55);
-        const speed = direction === 'base' ? Math.min(limit, .55)
+        const current = Number(knobVal(id) || .70);
+        const speed = direction === 'base' ? Math.min(limit, .70)
           : Math.max(.45, Math.min(limit, +(current + (direction === 'up' ? step : -step)).toFixed(2)));
         const values = { [id]: speed };
         if (name === 'corner' && !(knobVal('speed_straight') > 0)) values.speed_straight = speed;
@@ -1496,10 +1509,10 @@ let lapSpeedTimer = null, lapSpeedWrites = Promise.resolve();
 function syncLapSpeed() {
   const range = $('lapSpeed'), number = $('lapSpeedNumber');
   if (!range || !number || document.activeElement === range || document.activeElement === number) return;
-  const cap = Math.min(knobVal('max_auto') ?? 0.6, knobVal('top_throttle') ?? 0.6, 0.8);
+  const cap = Math.min(knobVal('max_auto') ?? 0.8, knobVal('top_throttle') ?? 0.8, 0.8);
   const current = [knobVal('speed_straight'), knobVal('speed_transition'), knobVal('speed_corner')]
     .filter(v => v != null && +v > 0).map(Number);
-  const value = Math.min(cap, current.length ? Math.min(...current) : 0.55);
+  const value = Math.min(cap, current.length ? Math.min(...current) : 0.70);
   range.max = number.max = Math.max(0.45, cap).toFixed(2);
   range.value = number.value = Math.min(Math.max(value, 0.45), +range.max).toFixed(2);
   $('lapSpeedReadout').textContent = range.value;
@@ -1528,7 +1541,7 @@ function wireLapControls() {
   const stepRange = $('tuneSpeedStep'), stepReadout = $('tuneSpeedStepReadout');
   stepRange.addEventListener('input', () => { stepReadout.textContent = (+stepRange.value).toFixed(2); });
   const changed = event => {
-    const value = Math.min(+range.max, Math.max(+range.min, +event.currentTarget.value || 0.55));
+    const value = Math.min(+range.max, Math.max(+range.min, +event.currentTarget.value || 0.70));
     range.value = number.value = value.toFixed(2);
     $('lapSpeedReadout').textContent = value.toFixed(2);
     clearTimeout(lapSpeedTimer);
@@ -1538,7 +1551,7 @@ function wireLapControls() {
   number.addEventListener('input', changed);
   $('lapStart').onclick = async () => {
     if (lapTune.active) return toast('Finish the current lap before starting another.');
-    const speed = +range.value, cap = Math.min(knobVal('max_auto') ?? 0.6, knobVal('top_throttle') ?? 0.6);
+    const speed = +range.value, cap = Math.min(knobVal('max_auto') ?? 0.8, knobVal('top_throttle') ?? 0.8);
     if (!src.live || !src.fresh) return toast('Car is disconnected or telemetry is stale.');
     if (lastTele?.status !== 'TRACKING' || !lastTele?.found) return toast('Line is not being tracked. Fix the camera view before starting a lap.');
     if (speed < 0.45 || speed > cap + 1e-6) return toast(`Choose a rolling speed at or below the current Full Auto limit (${cap.toFixed(2)}).`);
@@ -1582,7 +1595,7 @@ function wireLapControls() {
     catch (e) { toast('Stop request failed: ' + e.message); }
   };
   syncLapSpeed();
-  const baseline = Math.min(0.55, +range.max);
+  const baseline = Math.min(0.70, +range.max);
   range.value = number.value = baseline.toFixed(2);
   $('lapSpeedReadout').textContent = baseline.toFixed(2);
 }

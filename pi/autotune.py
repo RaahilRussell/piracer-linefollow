@@ -67,8 +67,8 @@ def interp_schedule(schedule, throttle):
 @dataclass
 class AutoTuner:
     pilot: object                       # LineFollowerPilot (its .cfg is what the car uses)
-    start: float = 0.55                 # first speed (must be above the motor's start point)
-    step: float = 0.03
+    start: float = 0.70                 # faster initial throttle for Lap Tuner trials
+    step: float = 0.08
     ceiling: float = 0.80               # never above this
     window_s: float = 10.0
     settle_s: float = 2.0               # ignore this long after any change

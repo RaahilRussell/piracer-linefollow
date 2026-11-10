@@ -63,7 +63,7 @@ SPEED_TABLE = [[370, 0.0], [387, 0.0], [390, 0.35], [407, 1.8]]
 # Measured: wheels start between stick ~0.45 and ~0.55 (PWM ~387-390).
 AUTO_CRAWL = True
 CRAWL_START = 0.40         # PWM ~385
-CRAWL_MAX = 0.60           # PWM ~392 hard ceiling (humans drive at ~1.0 = PWM 407)
+CRAWL_MAX = 0.80           # respect the raised Full Auto cap when auto-crawl is used
 CRAWL_RAMP_UP = 0.10       # throttle per second while not moving
 CRAWL_MOVE_MOTION = 2.5    # camera motion score that counts as rolling
 CRAWL_FAST_MOTION = 6.0    # above this it eases off
@@ -94,33 +94,33 @@ SINGLE_LINE_STOP_S = 2.5
 # Curvature drives the handoff: straight -> transition -> corner. The plan slews throttle
 # down/up so a bend is entered progressively and the car only accelerates after curvature clears.
 # The auto-tuner fills straight/corner; transition defaults to their midpoint.
-SPEED_STRAIGHT = 0.55   # conservative first-pass throttle command; increase only after passes
-SPEED_TRANSITION = 0.55 # neutral handoff for the first passes
-SPEED_CORNER = 0.55     # begin at crawl pace; lower only after confirming it still rolls
+SPEED_STRAIGHT = 0.70   # faster starting throttle for the Lap Tuner
+SPEED_TRANSITION = 0.70 # keep the handoff near the starting straight/curve speed
+SPEED_CORNER = 0.70     # faster starting throttle; lower independently if corners bog or run wide
 SPEED_RAMP_DOWN = 1.0    # throttle units / s when entering a bend
 SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend
 
 # --- Auto-tuner (dashboard "Auto-tune": start slow, fix gains, step speed up) ------
-AUTOTUNE_START = 0.55      # first speed (just above where the motor starts)
-AUTOTUNE_STEP = 0.03       # speed added after each healthy window
+AUTOTUNE_START = 0.70      # faster initial Lap Tuner speed
+AUTOTUNE_STEP = 0.08       # speed added after each healthy window
 AUTOTUNE_WINDOW_S = 10.0   # driving judged per step (about 1-2 laps)
 
 # --- Throttle (used in 'local' mode only if AUTO_CRAWL = False and the speed plan is off) ---
 LINE_THROTTLE = 0.35       # pilot crawl (~PWM 383). 0.20 (~377) did not move the car from a stop.
-MAX_THROTTLE = 0.60        # hard cap for any pilot throttle (fixed or auto-crawl)
+MAX_THROTTLE = 0.80        # hard cap for any pilot throttle (fixed or auto-crawl)
 
 # --- Top speed for EVERY mode (gamepad stick included) -----------------------
 # Final forward throttle sent to the motor is clipped to this (1.0 = the car's
 # normal full stick). Reverse / E-stop braking is never limited.
 # PWM ~= 370 + 37 * throttle (stopped 370, full 407). If the car won't move
 # at all, raise it in steps of 0.05.
-TOP_THROTTLE = 0.60        # (~PWM 392) also limits your stick. Humans drive at ~1.0 (PWM 407).
+TOP_THROTTLE = 0.80        # (~PWM 400) overall cap; reverse / emergency braking remains available.
 
 # --- Max speed per mode (each is ALSO limited by TOP_THROTTLE) -------------------
 # Easiest way to set speeds. Wheels only start turning from about 0.45-0.55.
 MAX_USER = 0.60            # you drive (gamepad / web joystick)
 MAX_PILOT_STEERS = 0.60    # pilot steers, you give throttle  (A once)
-MAX_AUTO = 0.60            # full auto (A twice): also caps auto-crawl
+MAX_AUTO = 0.80            # full auto (A twice): also caps auto-crawl
 
 # --- Slow down in turns (pilot modes only, including your stick in local_angle) ---
 # The car is faster than it can turn, so throttle is scaled by how hard the
