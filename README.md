@@ -4,18 +4,37 @@ A Waveshare PiRacer Pro follows the inside orange tape counter-clockwise around 
 
 The current race controller uses **pure pursuit for steering geometry and PD for a small visual correction**. The Race preset completed a nominal simulated lap in **3.69 s**. The November 10 controller still needs a timed run on the physical car.
 
-## Open the dashboard
+## Recommended run on the car
 
-**On your Mac**, run the simulator to try the dashboard and watch how steering and throttle change around the track.
+Load the current project onto the Pi, then use the three on-car presets in order. The dashboard is hosted by the Pi, so it appears when the car program is running.
+
+1. On the Mac, connect to the Pi's Wi-Fi and run `./car.sh`. This finds the Pi, installs the checked bundle when needed, starts the car program, and opens the Pi dashboard. The car starts in Manual.
+2. Place the car at the start mark. Check the live camera overlay and make sure the inside line is tracked. Choose **First slow lap**, then switch to **Full Auto** and watch the car complete the circle. Stop if it loses the line or approaches the wall.
+3. If the slow lap stays on the track, select **Safe race** and run a lap. This is the intermediate speed check.
+4. If Safe race also stays on the track, select **Race**. It uses the highest straight speed and a slightly lower curve speed.
+
+The presets change the running car's settings immediately. **Save Tuning** keeps them across a program restart. To load updated code, restart the car program with `./car.sh restart`. A Pi reboot is not part of the normal code update.
+
+## Visual guide
+
+The overlay below is a saved test frame from the car. Orange marks the detected tape, and the blue vertical line is the image target. The live dashboard adds the current track estimate, throttle, steering and section readouts beside the video.
+
+![Recorded PiRacer camera frame with line-follower overlay](tests/frames/live_060.jpg)
+
+The track diagram is reconstructed from an image of the Waveshare mat. It helps explain the repeated semicircles and straights. Its dimensions are estimates until measured on the physical mat.
+
+![Image-derived estimate of the Waveshare track](sim/tracks/waveshare_track_extracted.svg)
+
+**Try the simulator on your Mac** to watch the same steering and throttle logic run against a simulated car.
 
 ```bash
 python3 -m pip install -r requirements.txt -r requirements-test.txt
 python3 pi/sim_dashboard.py --sim 8893
 ```
 
-Open [the local dashboard](http://localhost:8893/). Its source indicator identifies the simulator. On the Pi, the same root page serves the Lap Tuner and `/classic` opens the detailed telemetry dashboard.
+The local page at [localhost:8893](http://localhost:8893/) is available while the simulator runs. Its source badge explicitly identifies simulated telemetry. The car dashboard is served separately by the Pi.
 
-**For the car**, connect the Mac to the Pi's Wi-Fi network and use the configured SSH key. From the repository root:
+For updates, connect the Mac to the Pi's Wi-Fi network and use the configured SSH key. From the repository root:
 
 ```bash
 ./car.sh pull     # update main and check the deployment bundle locally
@@ -23,7 +42,7 @@ Open [the local dashboard](http://localhost:8893/). Its source indicator identif
 ./car.sh          # find the Pi, install if needed, start the dashboard
 ```
 
-The program starts in Manual. Measure the lens height and camera pitch, enter them on the dashboard, and save them on the car. Place the car at the start mark, check that the overlay follows the inside edge, select **First slow lap**, then choose **Full Auto** when ready. Dashboard **STOP** or Space returns to Manual with zero throttle. On the gamepad, A cycles modes, Y is the emergency stop, and X quits the program.
+The program starts in Manual. Dashboard **STOP** or Space returns to Manual with zero throttle. On the gamepad, A cycles modes, Y is the emergency stop, and X quits the program.
 
 ## How the steering evolved
 
