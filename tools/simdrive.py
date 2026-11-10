@@ -40,10 +40,10 @@ VARIATIONS = {
     "speed -15%": {"speed_table": [[370, 0.0], [387, 0.0], [390, 0.30], [407, 1.53]]},
     "speed +15%": {"speed_table": [[370, 0.0], [387, 0.0], [390, 0.40], [407, 2.07]]},
     "slow servo": {"servo_rate_dps": 150.0, "servo_tau_s": 0.08},
-    "camera pitch 12": {"cam_pitch_deg": 12.0},
-    "camera pitch 18": {"cam_pitch_deg": 18.0},
-    "camera 11 cm high": {"cam_height_m": 0.11},
-    "camera 14 cm high": {"cam_height_m": 0.14},
+    "camera pitch 6": {"cam_pitch_deg": 6.0},
+    "camera pitch 10": {"cam_pitch_deg": 10.0},
+    "camera 13 cm high": {"cam_height_m": 0.13},
+    "camera 17 cm high": {"cam_height_m": 0.17},
     "noisy, 5% dropout": {"meas_noise": 0.012, "meas_dropout": 0.05},
 }
 

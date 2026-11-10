@@ -31,8 +31,8 @@ class CarModel:
     steer_max_deg: float = 18.0          # wheel angle at steering command +/-1 (FITTED to recorded runs, not measured;
                                          # the pilot steers with Config.steer_max_deg, which line_config keeps equal)
     camera_fov_deg: float = 160.0        # diagonal, equidistant fisheye (ASSUMED interpretation)
-    cam_height_m: float = 0.12           # ESTIMATED (Waveshare photos + mat lane width; sim/profile.json), not measured
-    cam_pitch_deg: float = 15.0          # ESTIMATED (camera fit to real frames + line spacing), not measured
+    cam_height_m: float = 0.15           # ESTIMATED from real race-mat frames (lane width, curve radius; sim/profile.json), not measured
+    cam_pitch_deg: float = 8.0           # ESTIMATED from real race-mat frames (tape edges parallel), not measured
     cam_fwd_m: float = 0.15              # camera ahead of the rear axle (ASSUMED)
     cam_roll_deg: float = 0.0            # camera rotated about its viewing axis (+ = image turned clockwise)
     lens_k1: float = 0.0                 # fisheye distortion beyond equidistant: theta = rho * (1 + k1 * rho^2)

@@ -594,7 +594,8 @@ class PresetsAndPage(unittest.TestCase):
         safe = presets["safe"]["values"]
         self.assertEqual((safe["speed_straight"], safe["speed_corner"], safe["target_x_ratio"]),
                          (lc.SAFE_SPEED_STRAIGHT, lc.SAFE_SPEED_CORNER, lc.TARGET_X_RATIO))
-        self.assertLess(safe["speed_corner"], race["speed_corner"])
+        self.assertLessEqual(safe["speed_corner"], race["speed_corner"])
+        self.assertLess(safe["speed_straight"], race["speed_straight"])
         hub.apply_preset("pd")
         self.assertFalse(hub.cfg.pure_pursuit)
         self.assertEqual(hub.cfg.target_x_ratio, 0.40)
@@ -649,5 +650,5 @@ class PresetsAndPage(unittest.TestCase):
         hub, lc, webui = self.hub()
         est = next(p for p in hub.presets() if p["id"] == "race")["estimate"]
         self.assertTrue(est["estimate"])
-        self.assertAlmostEqual(est["lap_s"], 3.5, delta=0.25)             # simulator at the race values: 3.50 s
+        self.assertAlmostEqual(est["lap_s"], 4.05, delta=0.25)            # estimate at 1.00 / 0.86 (assumed speed table); real laps 3.54-3.77 s
         self.assertAlmostEqual(est["total_s"], 10 * est["lap_s"], delta=0.06)

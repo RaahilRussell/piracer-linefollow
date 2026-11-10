@@ -452,7 +452,7 @@ const HELP = {
   corner_kp: 'Higher = turns in harder. Above 3.5 caused curve crashes in the simulator; steering is already at full lock in most curves.',
   ff_gain: 'Only with PD steering: adds steering for the bend it sees ahead. 0 = off. In the simulator it ran wide at curve exits above 0.90 throttle.',
   lookahead_ratio: 'Image row PD steering measures on. Lower = looks further ahead (reacts earlier, cuts corners more).',
-  target_x_ratio: 'Where the line\u2019s inside edge sits across the image. Higher = the car rides closer to the inside line. 0.40 for both steering laws (Nov 10 re-fit with the camera at 0.12 m / 15\u00b0; 0.42+ ran wide with extra delay in the simulator, and PD at 0.46 ran onto the left tape).',
+  target_x_ratio: 'Where the line\u2019s inside edge sits across the image. Higher = the car rides closer to the inside line. 0.40 for both steering laws (Nov 10; 0.42+ ran wide with extra delay in the simulator, and PD at 0.46 ran onto the left tape).',
   max_auto: 'Highest throttle Full Auto and the ramp can use.',
   max_steering: 'Keep at 1.0 = full left lock (PWM 450, about 18\u00b0 of wheel angle, fitted to recorded runs). At 0.8 the recorded runs lost the line 58% of the time in the tightest curves.',
   corner_exit_steer: 'Stays in curve steering and speed until the wheel unwinds below this. Stops it speeding up and running wide at curve exits.',

@@ -68,9 +68,10 @@ WHEELBASE_M = 0.1741
 STEER_MAX_DEG = 18.0       # wheel angle at full steering command. FITTED to the recorded runs (tools/calibrate_sim.py),
                            # same value as the simulator (sim/profile.json); a slider on the dashboard. Measure it to be sure.
 CAMERA_FOV_DEG = 160.0
-CAM_HEIGHT_M = 0.12        # ESTIMATED Nov 10 (Waveshare photos 0.118 m; mat lane width -> 0.124 m). Was 0.17. Measure with a ruler.
-CAM_PITCH_DEG = 15.0       # ESTIMATED Nov 10 (camera fit 15.2; line spacing in real frames). Was 8. If unsure, err high / err low on height:
-                           # that way pure pursuit cuts inside instead of running wide.
+CAM_HEIGHT_M = 0.15        # ESTIMATED Nov 10 evening from the real race-mat run: straight lane 0.29 m, inner curve 1.85/m and
+                           # line spacing 0.283 at the 0.62 row all match. (0.12 m / 15 deg predicted 0.45 spacing; real is 0.28.) Ruler beats this.
+CAM_PITCH_DEG = 8.0        # ESTIMATED Nov 10 evening: race-mat tape edges project parallel at 6-8 deg (15 deg: 4x worse, lines converge).
+                           # If unsure, err high on pitch / low on height: pure pursuit then cuts inside instead of running wide.
 CAM_FWD_M = 0.15
 GRIP_MU = 0.5
 BRAKE_DECEL = 1.5
@@ -95,7 +96,7 @@ CRAWL_FAST_MOTION = 6.0    # above this it eases off
 # Geometry only starts a track (two lines one lane apart, or one line by the side it passes).
 TRACK_MEMORY_FRAMES = 8    # a boundary that vanishes keeps its place this many frames (0.4 s)
 LONE_CONFIRM_FRAMES = 1    # 2-3 = a single new line must hold still that many frames before it is trusted
-LANE_WIDTH_RATIO = 0.47    # lane width at the lookahead row before it has been learned (fraction of width)
+LANE_WIDTH_RATIO = 0.29    # lane width at the lookahead row before it has been learned (fraction of width). Real race-mat straights: 0.28
 MASK_GROW_PX = 3           # strict orange grows this far into nearly-orange pixels (glare holes); 0 = off
 MAX_EDGE_ROUGHNESS_PX = 2.5  # ragged-edged orange (wood grain, skin) is not tape; 0 = off
 
@@ -120,15 +121,16 @@ SINGLE_LINE_STOP_S = 2.5
 SPEED_STRAIGHT = 0.75
 SPEED_TRANSITION = 0.75
 SPEED_CORNER = 0.70
-# RACE VALUES (simulated only; camera 0.12 m / 15 deg, steering rate 6, delay compensation 0.15 s):
-# 1.00 / 0.90 = 3.69 s lap and passes all 21 race_eval variations, two-unknowns-wrong pairs included. 1.00 / 0.91
-# also passes (3.67 s) but 0.92 fails fast car + low grip, so 0.90 keeps one step of margin. Without delay
-# compensation 1.00 / 0.90 fails 3 pairs: if PURSUIT_PREDICT_S is set to 0, press "Safe race" instead.
-# The dashboard's "Race" preset. Every speed in the simulator rests on the assumed SPEED_TABLE, so trust the lap tuner.
+# RACE VALUES: REAL, Nov 10 evening, camera 0.15 m / 8 deg, 10-lap runs on the race mat:
+#   1.00 / 0.93 / 0.86: laps 3.54-3.77 s (mean 3.68), 0 line losses, right-line backup 2% of frames.
+#   1.00 / 0.94 / 0.88: mean 3.59 s but 2 brief line losses, backup 11%: the edge.
+#   1.00 / 0.95 / 0.90 (old Race): mean ~3.7 s incl. one 5.2 s lap, 4 laps with line losses, full lock with the
+#   inside line sliding out of view: the car physically can't turn tighter at that speed, so it runs wide.
+# The dashboard's "Race" preset.
 RACE_SPEED_STRAIGHT = 1.00
-RACE_SPEED_TRANSITION = 0.95
-RACE_SPEED_CORNER = 0.90
-# SAFE RACE: 0.92 / 0.86 = 4.1 s lap, the fastest pair that also passes every two-unknowns-wrong pair. The "Safe race" preset.
+RACE_SPEED_TRANSITION = 0.93
+RACE_SPEED_CORNER = 0.86
+# SAFE RACE: 0.92 / 0.86. REAL Nov 10 evening: 10 laps 3.67-3.81 s, 0 line losses. The "Safe race" preset.
 SAFE_SPEED_STRAIGHT = 0.92
 SAFE_SPEED_TRANSITION = 0.89
 SAFE_SPEED_CORNER = 0.86

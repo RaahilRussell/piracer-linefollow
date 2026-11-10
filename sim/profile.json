@@ -261,24 +261,24 @@
     "source": "UNKNOWN tyre-to-mat grip (max lateral accel / 9.81). CALIBRATION.md step 5"
   },
   "cam_height_m": {
-    "value": 0.12,
+    "value": 0.15,
     "unit": "m",
     "range": [
-      0.11,
-      0.15
+      0.13,
+      0.17
     ],
     "status": "estimated",
-    "source": "ESTIMATED Nov 10 from two independent sources: (1) Waveshare side photos scaled by the 174.1 mm wheelbase put the lens centre at 0.118 m; (2) tools/calibrate_camera.py gives lane 0.366 m at 0.17 m, and the Waveshare mat diagram (to scale, 3.46 mm/px) has a 0.27 m lane on the straights -> 0.124 m. Measure with a ruler: CALIBRATION.md step 7"
+    "source": "ESTIMATED Nov 10 evening from the Nov 10 14:26 race-mat run (3255 real frames): with pitch 8 deg the tape edges project parallel (tools/calibrate_camera.py cost), and height 0.15 m makes (a) the straight lane 0.29 m (mat 0.27-0.30), (b) the inner curve edge curvature 1.85/m (traced 1.7-1.8), (c) the line spacing at the 0.62 row 0.283 of width (real straights: 0.283). The earlier 0.12 m / 15 deg predicted 0.43-0.47 there. Measure with a ruler: CALIBRATION.md step 7"
   },
   "cam_pitch_deg": {
-    "value": 15.0,
+    "value": 8.0,
     "unit": "deg down",
     "range": [
-      12.0,
-      18.0
+      6.0,
+      10.0
     ],
     "status": "estimated",
-    "source": "ESTIMATED Nov 10: tools/calibrate_camera.py fit to real frames gives 15.2 deg; only ~15 deg at 0.12 m reproduces the real 0.47-of-width line spacing at the 0.62 row on the 0.30 m mat lane (0.17 m / 8 deg gives 0.25). The old 8 deg used the wall base as the horizon, which sits below it, so 8 is a lower bound; the stock Waveshare photo shows 22-28 deg (upper bound; this car's frames show a flatter mount). Measure with a phone inclinometer: CALIBRATION.md step 7"
+    "source": "ESTIMATED Nov 10 evening: fit to 738 race-mat frames, edges parallel at 6-8 deg (parallel CV 0.031-0.036 held out 0.033) vs 15 deg (0.125, held out 0.118). The earlier 15.2 deg fit was joint with roll -3.2, k1 -0.076, cx -14.6 px on stage frames, and only its pitch was used on the car. Measure with a phone inclinometer: CALIBRATION.md step 7"
   },
   "cam_fwd_m": {
     "value": 0.15,

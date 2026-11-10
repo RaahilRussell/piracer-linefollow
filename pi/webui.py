@@ -62,8 +62,8 @@ KNOBS = [
     ("steer_max_deg", "Steering law", "Full-lock wheel angle (deg)", 10.0, 30.0, 0.5, "Wheel angle at full steering. 18 is fitted to recorded runs, not measured. Used by pure pursuit and feedforward; the simulator uses the same value."),
     ("pursuit_predict_s", "Steering law", "Delay compensation (s)", 0.0, 0.3, 0.01, "Pure pursuit aims from where the car will be this long after the camera frame (it keeps moving while the frame is processed and the servo turns). 0 = off. Logs suggest about 0.15 s from command to motion."),
     ("conf_slow_below", "Full auto speed", "Slow when detection below", 0.0, 0.9, 0.05, "Below this line-detection confidence, throttle blends down to curve speed (reaching it at Min confidence). Real tracking is usually 0.7-0.85. 0 = off."),
-    ("cam_height_m", "Steering law", "Camera height (m)", 0.08, 0.22, 0.005, "Lens centre above the floor. 0.12 is ESTIMATED (Waveshare photos, mat lane width); measure it with a ruler and enter it. Pure pursuit aims through this: set too high and the car runs wide."),
-    ("cam_pitch_deg", "Steering law", "Camera tilt down (deg)", 0.0, 30.0, 0.5, "How far the camera's view points down from horizontal. 15 is ESTIMATED from recorded frames; measure with a phone level against the board. Set too low and pure pursuit runs wide."),
+    ("cam_height_m", "Steering law", "Camera height (m)", 0.08, 0.22, 0.005, "Lens centre above the floor. 0.15 is fitted to real race-mat frames (lane width, curve radius, line spacing); a ruler beats it. Pure pursuit aims through this: set too high and the car runs wide. 0.12 (with tilt 15) made it cut every curve."),
+    ("cam_pitch_deg", "Steering law", "Camera tilt down (deg)", 0.0, 30.0, 0.5, "How far the camera's view points down from horizontal. 8 is fitted to real race-mat frames (the two tape edges come out parallel); 15 made them converge 4x more. Measure with a phone level. Set too low and pure pursuit runs wide."),
     ("speed_straight", "Full auto speed", "Straight speed (plan)", 0.0, 1.0, 0.01, "0 = off. Fast target on a settled straight. Bends and large corrections reduce it."),
     ("speed_transition", "Full auto speed", "Transition speed (plan)", 0.0, 1.0, 0.01, "Speed while a bend is building. 0 = midpoint of straight and corner speed."),
     ("speed_corner", "Full auto speed", "Corner speed (plan)", 0.0, 1.0, 0.01, "Lower target in a bend or large recovery. Never above straight speed. Keep high enough to roll."),
@@ -366,11 +366,11 @@ class Hub:
         out = []
         for pid, label, change, text in (
                 ("race", "Race", {}, f"The race values from line_config.py: straight {race.get('speed_straight', 0):.2f}, curve "
-                 f"{race.get('speed_corner', 0):.2f}, {law}, target {race.get('target_x_ratio', 0):.2f}. About 3.7 s a lap in the simulator, with delay "
-                 "compensation on; never ran wide even with two assumed values wrong at once. Not yet driven at this speed on the real car."),
+                 f"{race.get('speed_corner', 0):.2f}, {law}, target {race.get('target_x_ratio', 0):.2f}. Real car, Nov 10: 10 laps 3.54-3.77 s "
+                 "with no line losses. Curve 0.88+ starts to run wide at full lock."),
                 ("safe", "Safe race", self.safe_speeds, f"Race steering at straight {self.safe_speeds.get('speed_straight', 0):.2f} / curve "
-                 f"{self.safe_speeds.get('speed_corner', 0):.2f}: about 4.1 s a lap, and never ran wide in the simulator even with two "
-                 "assumed values wrong at once. Use it if Race runs wide."),
+                 f"{self.safe_speeds.get('speed_corner', 0):.2f}: real car, Nov 10: 10 laps 3.67-3.81 s with no "
+                 "line losses. Use it if Race runs wide (low battery, different floor)."),
                 ("slow", "First slow lap", SLOW_LAP, "The race steering at 0.75 / 0.70 throttle (the speed the car has already "
                  "driven, and what the lap tuner climbs from). Use it for the first lap of the day, then press Race."),
                 ("pd", "PD fallback", PD_FALLBACK, "Switches pure pursuit off: PD steering as driven on the real car on Nov 9, "

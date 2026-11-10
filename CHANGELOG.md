@@ -8,6 +8,53 @@ Conventions:
 
 ---
 
+## Nov 10 evening: camera model corrected to 0.15 m / 8°; Race 1.00 / 0.93 / 0.86 (**real**, first real pure-pursuit laps)
+
+**Symptom (real, run `20261110-142638`, 14:26).** At 0.75 / 0.70 with camera 0.12 m / 15°:
+- laps of 18.1 s and 9.8 s, with 9–11 line losses per lap
+- steering at full lock 43% of moving frames
+- right-line backup ~30% of frames
+
+Replaying the frames showed the same thing every curve:
+1. The car turned in early and crossed the inside tape diagonally.
+2. The tape, now under the car, was relabelled "right", and pursuit steered hard right (+0.6 to +1.0) inside a left curve.
+3. The car ran wide and spent ~1.5 s at full left lock recovering. The overshoot carried into the next curve.
+
+**Cause: the camera model was wrong.** The 15.2° pitch came from a *joint* fit (with roll −3.2°, k1 −0.076, centre −14.6 px) on stage frames. Only the pitch was carried to the car; `car_model()` doesn't read the other three at all. Checked on 738 real race-mat frames with both lines (`tools/calibrate_camera.py` cost, train / held-out):
+
+| | edge-parallel CV (held out) | lane width | inner curve edge | line spacing at the 0.62 row (real: **0.283**) |
+|---|---|---|---|---|
+| 0.12 m / 15° (was) | 0.125 (0.118) | 0.19–0.20 m | 2.4 /m at 0.17 m | 0.43–0.47 |
+| **0.15 m / 8° (now)** | **0.031 (0.033)** | **0.29 m** (mat 0.27–0.30) | **1.85 /m** (traced 1.7–1.8) | **0.283–0.31** |
+
+In the simulator, rendering with the true camera (0.15 / 8) but piloting with the old model reproduces the real failure: 14–21 inside off-tracks per 30 s and 27–36% full lock. With the matching model there are 0.
+
+**Real results after the change** (dashboard sliders, same battery session, 40 s each, lap timer):
+
+| Speeds (straight / transition / curve) | Laps (s) | Line losses | Right-line backup | Full lock |
+|---|---|---|---|---|
+| 0.75 / 0.75 / 0.70 | 6.94–7.32 (5 laps) | 0 | 0% | 14% |
+| 0.92 / 0.89 / 0.86 (Safe race) | 3.67–3.81, mean 3.75 | 0 | 0% | 36% |
+| **1.00 / 0.93 / 0.86 (new Race)** | **3.54–3.77, mean 3.68** | **0** | 2% | 40% |
+| 1.00 / 0.94 / 0.88 | 3.50–3.72, mean 3.59 | 2 brief | 11% | 40% |
+| 1.00 / 0.95 / 0.90 (old Race) | 3.40–3.67 + one 5.16 | 4 laps | 21% | 47% |
+
+At curve 0.90 the car sits at full lock with the inside line sliding out of the left of the image. It physically can't turn tighter at that speed, so it runs wide, and that's where the +5 s penalties come from. 0.86 is the clean limit. 0.88 would save ~0.9 s over 10 laps but risks a 5 s penalty.
+
+**Changes:**
+- `CAM_HEIGHT_M` 0.12 → **0.15**, `CAM_PITCH_DEG` 15 → **8** (`pi/line_config.py`, `sim/profile.json`, `CarModel` defaults). The race_eval camera variations are re-centred to 13 / 17 cm and 6 / 10°.
+- `LANE_WIDTH_RATIO` 0.47 → **0.29** (real straights: 0.283). This is the right-line backup's lane width before it's learned.
+- `RACE_SPEED_*` 1.00 / 0.95 / 0.90 → **1.00 / 0.93 / 0.86**. Safe race is unchanged (0.92 / 0.86), now with real numbers.
+- Dashboard help text for the camera sliders and the Race / Safe presets now states the real results.
+- Tests: the race lap bound is 4.2 s (*sim* 4.0 s; the simulator's speed table is ~9% slow against the real car). The lap-estimate test expects 4.05 s. Safe must be no faster than Race in curves and slower on straights. The feedforward test now pins `FF_GAIN = 0` with the new *sim* numbers (PD 30 vs PD + FF 26 off-tracks: marginal, PD-only).
+- *sim* `race_eval --pairs`: 1.00 / 0.86 and 0.92 / 0.86 both pass all 21 variations (4.01 s and 4.17 s nominal).
+
+**On the car now:** these values are set live and saved in `~/linefollow/tuning.json`. The code itself is **not deployed**. Once it is, the new defaults equal the saved values.
+
+**Still open:** a ruler / phone-level check of height and tilt. PD share, lookahead and delay compensation were not re-tuned on the real car. Full lock at 40% in curves suggests curve speed, not steering gain, is the limit.
+
+---
+
 ## At a glance: Nov 9 ~8 pm vs 9:31 pm vs now
 
 | | Nov 9 ~8 pm (`99c1647`) | Nov 9 9:31 pm (`88375a3`, last push before Nov 10) | **Now (`main`)** |
