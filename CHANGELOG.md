@@ -8,6 +8,30 @@ Conventions:
 
 ---
 
+## Nov 10 evening (3): race-day dashboard (`pi/laptuner.html`, served at `/`)
+
+The page was a long scroll: guide, timer, tuner, laps table, then the camera halfway down, then ~60 sliders. It's now a dark, minimal layout built around the camera.
+
+**Main screen:**
+- **Top bar:** connection status, the Manual / Pilot steers / Full Auto switch, **STOP** (Space works too) and **Settings**. An orange dot on Settings means there are unsaved changes.
+- **Camera:** sized to fill the screen. The overlay shows the section (Straight / Curve / Line lost), plus throttle, steering (with a left/right bar) and curve radius.
+- **Lap strip:** this lap, last lap, best, 10-lap race total, line losses, and Reset timer.
+- **Preset buttons:** Race / Safe race / First slow lap / PD fallback, plus **Save on car**.
+
+**Settings drawer** (Settings button, or open `/#settings` directly; Esc closes it):
+- **Tuning:** a "Find a setting" filter, the presets with their full descriptions, then every slider in collapsible groups. A dot marks any group with a value changed from its default. Save on car / Reset to defaults sit at the bottom.
+- **Lap tuner:** track map, Start / Curve too fast / Straight too fast / End, and the laps table. Unchanged in function.
+- **Activity:** the event log.
+- **Guide:** race-day steps, the modes, how it steers, and how the lap tuner works. Links to `/classic`.
+
+**Unchanged:**
+- Every knob is still a slider: 67 of 67 render, which the existing page test also checks.
+- The APIs, the step buttons, the two-tap "car will move" confirmation and the `/classic` page are the same.
+
+**Checked:** headless Chrome against `pi/sim_dashboard.py --sim` at desktop (1440×900) and phone (390×844) widths.
+
+---
+
 ## Nov 10 evening (2): motor PWM 420 + faster speed-up: Race mean 3.77 → 3.59 s (**real**)
 
 **Where the lap time goes (real telemetry, Race at PWM 407).** The car spent:

@@ -2,262 +2,304 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PiRacer Lap Tuner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B0B0D">
+<title>PiRacer</title>
 <style>
 :root {
-  --bg: #F2F2F7; --group: #FFFFFF; --fill: #E9E9EE; --sep: rgba(60,60,67,.18);
-  --label: #1C1C1E; --label2: rgba(60,60,67,.62); --label3: rgba(60,60,67,.36);
-  --blue: #007AFF; --green: #34C759; --orange: #FF9500; --red: #FF3B30; --yellow: #FFCC00;
-  --tape: #FF8A1F; --track: #3A3A3C;
-  --r-group: 12px; --r-ctrl: 9px;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #000000; --group: #1C1C1E; --fill: #2C2C2E; --sep: rgba(84,84,88,.6);
-    --label: #FFFFFF; --label2: rgba(235,235,245,.62); --label3: rgba(235,235,245,.32);
-    --blue: #0A84FF; --green: #30D158; --orange: #FF9F0A; --red: #FF453A; --yellow: #FFD60A;
-    --track: #48484A; color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #000000; --group: #1C1C1E; --fill: #2C2C2E; --sep: rgba(84,84,88,.6);
-  --label: #FFFFFF; --label2: rgba(235,235,245,.62); --label3: rgba(235,235,245,.32);
-  --blue: #0A84FF; --green: #30D158; --orange: #FF9F0A; --red: #FF453A; --yellow: #FFD60A;
-  --track: #48484A; color-scheme: dark;
+  --bg: #0B0B0D; --surface: #151518; --surface2: #1D1D21; --line: rgba(255,255,255,.08); --line2: rgba(255,255,255,.14);
+  --text: #F4F4F6; --muted: #8E8E96; --faint: #5A5A62;
+  --accent: #0A84FF; --green: #30D158; --orange: #FF9F0A; --red: #FF453A; --tape: #FF8A1F;
+  --radius: 14px; --bar-h: 56px;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html, body { height: 100%; overflow-x: clip; }
 body {
-  margin: 0; background: var(--bg); color: var(--label);
-  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%;
 }
-button, input, select { font: inherit; color: inherit; }
-:focus-visible { outline: 3px solid color-mix(in srgb, var(--blue) 55%, transparent); outline-offset: 2px; border-radius: 6px; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 8px; }
 .num { font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+a { color: var(--accent); text-decoration: none; }
 
 /* ---------- top bar ---------- */
 .bar {
-  position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  padding: 10px max(16px, env(safe-area-inset-left)) 10px;
-  background: color-mix(in srgb, var(--bg) 78%, transparent);
-  backdrop-filter: saturate(180%) blur(20px); -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: .5px solid var(--sep);
+  position: sticky; top: 0; z-index: 20; height: var(--bar-h);
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--line);
 }
-.bar h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
-.source { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--label2); }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--label3); }
-.dot.live { background: var(--green); }
-.dot.sim { background: var(--blue); }
+.brand { font-weight: 650; letter-spacing: -.01em; font-size: 15px; }
+.source { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.dot.live { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.dot.sim { background: var(--accent); }
 .dot.stale { background: var(--orange); }
-.bar .spacer { flex: 1; }
-.seg {
-  display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr;
-  background: var(--fill); border-radius: var(--r-ctrl); padding: 2px; gap: 2px;
-}
-.seg button {
-  border: 0; background: transparent; padding: 5px 14px; border-radius: 7px;
-  font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
-}
-.seg button[aria-pressed="true"] { background: var(--group); box-shadow: 0 1px 3px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04); font-weight: 600; }
-.stop {
-  border: 0; background: var(--red); color: #fff; font-weight: 600;
-  padding: 7px 18px; border-radius: 980px; cursor: pointer; font-size: 14px;
-}
-.stop:active { filter: brightness(.9); }
+.spacer { flex: 1; }
+.seg { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 12px; border-radius: 7px; font-size: 13px; font-weight: 550; white-space: nowrap; }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--surface2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line2); }
+#modeSeg button[data-mode="local"][aria-pressed="true"] { background: var(--accent); color: #fff; box-shadow: none; }
+.stop { border: 0; background: var(--red); color: #fff; font-weight: 700; letter-spacing: .02em; padding: 8px 20px; border-radius: 999px; font-size: 13px; }
+.stop:active { transform: scale(.97); }
+.icon-btn { position: relative; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 10px; padding: 7px 12px; font-size: 13px; font-weight: 550; }
+.icon-btn:hover { border-color: var(--line2); }
+.icon-btn svg { width: 16px; height: 16px; }
+.badge { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--orange); border: 2px solid var(--bg); }
 
-main { max-width: 1180px; margin: 0 auto; padding: 18px 16px 64px; }
-
-/* ---------- hero: camera + ladders ---------- */
-.hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
-@media (max-width: 880px) { .hero { grid-template-columns: 1fr; } }
-.panel { background: var(--group); border-radius: 16px; overflow: hidden; }
-.cam { position: relative; aspect-ratio: 5 / 4; background: #000; }
-.cam img { width: 100%; height: 100%; object-fit: contain; display: block; image-rendering: auto; }
-.cam .empty[hidden] { display: none; }
-.cam .empty { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.6); font-size: 14px; text-align: center; padding: 20px; }
-.hud {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--sep);
-  border-top: .5px solid var(--sep);
+/* ---------- stage: camera front and center ---------- */
+main { padding: 16px max(16px, env(safe-area-inset-left)) 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.stage {
+  position: relative; width: min(100%, calc((100dvh - var(--bar-h) - 200px) * 1.25)); min-width: min(100%, 320px);
+  aspect-ratio: 5 / 4; background: #000; border-radius: 18px; overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(0,0,0,.45);
 }
-.hud div { background: var(--group); padding: 10px 12px; }
-.hud .k { font-size: 12px; color: var(--label2); }
-.hud .v { font-size: 20px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
-.hud .v small { font-size: 12px; font-weight: 500; color: var(--label2); margin-left: 3px; }
-.sect-pill { display: inline-block; padding: 1px 9px; border-radius: 980px; font-size: 13px; font-weight: 600; }
-.sect-pill.straight { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
-.sect-pill.corner { background: color-mix(in srgb, var(--tape) 20%, transparent); color: var(--tape); }
-.sect-pill.unknown { background: var(--fill); color: var(--label2); }
-
-
-.actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.btn {
-  border: 0; border-radius: 980px; padding: 8px 16px; cursor: pointer; font-weight: 600; font-size: 14px;
-  background: var(--fill); color: var(--blue);
+.stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.stage .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; }
+.hud-top { position: absolute; top: 12px; right: 12px; display: flex; gap: 8px; pointer-events: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 650;
+  background: rgba(0,0,0,.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #fff; border: 1px solid rgba(255,255,255,.12); }
+.chip.straight { color: #7CC0FF; } .chip.corner { color: var(--tape); } .chip.lost { color: #fff; background: color-mix(in srgb, var(--red) 80%, transparent); }
+.hud-bottom {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 18px 14px;
+  background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,0)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; pointer-events: none;
 }
-.btn.primary { background: var(--blue); color: #fff; }
-.btn.confirm { background: var(--orange); color: #fff; }
+.hud-bottom .k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.6); }
+.hud-bottom .v { font-size: 22px; font-weight: 650; letter-spacing: -.01em; color: #fff; white-space: nowrap; }
+.hud-bottom .v small { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.6); margin-left: 4px; }
+.steerbar { position: relative; height: 3px; margin-top: 6px; background: rgba(255,255,255,.18); border-radius: 2px; max-width: 140px; }
+.steerbar i { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: #fff; border-radius: 2px; }
+.steerbar::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: rgba(255,255,255,.5); }
+
+/* ---------- lap strip ---------- */
+.laps-strip { width: min(100%, 980px); display: grid; grid-template-columns: 1.3fr repeat(4, 1fr) auto; align-items: end; gap: 4px 20px; padding: 4px 6px; }
+.stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.stat .v { font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.15; }
+.stat.main .v { font-size: 40px; }
+.stat .s { font-size: 12px; color: var(--muted); min-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ghost { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 10px; padding: 7px 12px; font-size: 12px; font-weight: 550; align-self: center; }
+.ghost:hover { color: var(--text); border-color: var(--line2); }
+
+/* ---------- presets ---------- */
+.quick { width: min(100%, 980px); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 6px; }
+.quick .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-right: 4px; }
+.pchip { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 550; }
+.pchip:hover { border-color: var(--line2); }
+.pchip.active { border-color: var(--accent); color: #fff; background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+.pchip .est { color: var(--muted); font-weight: 500; margin-left: 6px; }
+.quick .spacer { flex: 1; }
+#presetChips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+
+@media (max-width: 760px) {
+  :root { --bar-h: 104px; }
+  .bar { flex-wrap: wrap; height: auto; padding-top: 10px; padding-bottom: 10px; gap: 8px 10px; }
+  #modeSeg { order: 10; flex-basis: 100%; }
+  #modeSeg button { flex: 1; padding: 7px 6px; }
+  .icon-btn span { display: none; }
+  main { padding-top: 12px; gap: 12px; }
+  .stage { border-radius: 14px; }
+  .hud-bottom { padding: 30px 12px 10px; }
+  .hud-bottom .v { font-size: 17px; }
+  .laps-strip { grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+  .stat.main { grid-column: 1 / -1; }
+  .stat .v { font-size: 22px; } .stat.main .v { font-size: 36px; }
+  .laps-strip .ghost { grid-column: 1 / -1; justify-self: start; }
+}
+
+/* ---------- drawer ---------- */
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,.5); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
+.scrim.open { opacity: 1; pointer-events: auto; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); z-index: 31;
+  background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .25s cubic-bezier(.2,.8,.2,1);
+}
+.drawer.open { transform: none; }
+@media (prefers-reduced-motion: reduce) { .drawer, .scrim { transition: none; } }
+.dhead { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+.dhead h2 { margin: 0; font-size: 17px; font-weight: 650; flex: 1; }
+.close { border: 0; background: var(--surface2); color: var(--muted); width: 30px; height: 30px; border-radius: 50%; font-size: 16px; line-height: 1; }
+.tabs { display: flex; gap: 4px; padding: 0 12px 10px; border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 8px 6px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.tabs button[aria-selected="true"] { background: var(--surface2); color: var(--text); }
+.dbody { flex: 1; overflow-y: auto; padding: 14px 16px 24px; overscroll-behavior: contain; }
+.dfoot { border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dfoot .note { flex-basis: 100%; font-size: 12px; color: var(--muted); }
+.btn { border: 1px solid var(--line); background: var(--surface2); color: var(--text); border-radius: 10px; padding: 8px 14px; font-size: 13px; font-weight: 600; }
+.btn:hover { border-color: var(--line2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.confirm { background: var(--orange); border-color: var(--orange); color: #111; }
 .btn.danger { color: var(--red); }
-.btn:disabled { opacity: .4; cursor: default; }
-.stepsel { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--label2); }
+.btn:disabled { opacity: .35; cursor: default; }
 
-/* ---------- grouped settings ---------- */
-.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 28px; margin-top: 10px; }
-@media (max-width: 880px) { .cols { grid-template-columns: 1fr; } }
-.group-h { font-size: 13px; color: var(--label2); margin: 28px 16px 7px; }
-.group-h strong { color: var(--label); font-size: 20px; font-weight: 700; display: block; margin-bottom: 2px; letter-spacing: -.01em; }
-.group { background: var(--group); border-radius: var(--r-group); overflow: hidden; }
-.group-f { font-size: 13px; color: var(--label2); margin: 7px 16px 0; }
-.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 11px 16px; position: relative; align-items: center; }
-.row + .row::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; border-top: .5px solid var(--sep); }
-.row .lbl { font-size: 15px; }
-.row .help { grid-column: 1 / -1; font-size: 12px; color: var(--label2); margin-top: -2px; }
-.row .val { display: flex; align-items: center; gap: 6px; }
-.row input[type=number] {
-  width: 74px; text-align: right; border: 0; background: var(--fill); border-radius: 7px; padding: 4px 8px;
-  font-variant-numeric: tabular-nums;
-}
-.row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--blue); margin: 2px 0 0; }
+.filter { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 9px 12px; margin-bottom: 14px; }
+.filter::placeholder { color: var(--faint); }
+.sec-h { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 2px 8px; }
+.presets { display: grid; gap: 6px; margin-bottom: 18px; }
+.preset { text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; }
+.preset:hover { border-color: var(--line2); }
+.preset b { display: block; font-size: 14px; font-weight: 600; }
+.preset span { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+details.grp { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: var(--bg); overflow: hidden; }
+details.grp > summary { list-style: none; padding: 12px 14px; font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+details.grp > summary::-webkit-details-marker { display: none; }
+details.grp > summary::after { content: ""; margin-left: auto; width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); transition: transform .15s; }
+details.grp[open] > summary::after { transform: rotate(-135deg); }
+details.grp > summary .count { font-size: 11px; color: var(--faint); font-weight: 500; }
+details.grp > summary .dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); display: none; }
+details.grp.has-changed > summary .dirty { display: inline-block; }
+.grp-note { font-size: 12px; color: var(--muted); padding: 0 14px 8px; margin-top: -4px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 14px; border-top: 1px solid var(--line); align-items: center; }
+.row .lbl { font-size: 13px; }
+.row .help { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.row input[type=number] { width: 72px; text-align: right; border: 1px solid var(--line); background: var(--surface); border-radius: 7px; padding: 3px 7px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 4px 0 0; height: 18px; }
 .row.changed .lbl::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); margin-left: 7px; vertical-align: middle; }
-.row.flash input[type=number] { box-shadow: 0 0 0 2px var(--green); transition: box-shadow .2s; }
-.switch { position: relative; width: 51px; height: 31px; }
+.row.flash input[type=number] { border-color: var(--green); }
+.switch { position: relative; width: 42px; height: 24px; }
 .switch input { opacity: 0; position: absolute; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
-.switch span { position: absolute; inset: 0; border-radius: 31px; background: var(--fill); transition: background .2s; }
-.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.2); transition: transform .2s; }
-.switch input:checked + span { background: var(--green); }
-.switch input:checked + span::after { transform: translateX(20px); }
-.row.action { color: var(--blue); cursor: pointer; }
-.row.action:hover { background: color-mix(in srgb, var(--fill) 50%, transparent); }
+.switch span { position: absolute; inset: 0; border-radius: 24px; background: var(--surface2); border: 1px solid var(--line2); transition: background .2s; }
+.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .2s; }
+.switch input:checked + span { background: var(--green); border-color: var(--green); }
+.switch input:checked + span::after { transform: translateX(18px); }
 
-.savebar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 28px 16px 0; font-size: 13px; color: var(--label2); }
-
-details.more { margin-top: 8px; }
-details.more > summary { list-style: none; cursor: pointer; color: var(--blue); font-size: 15px; padding: 14px 16px 0; }
-details.more > summary::-webkit-details-marker { display: none; }
-
-.explain { background: var(--group); border-radius: var(--r-group); padding: 18px 20px; font-size: 14px; max-width: 74ch; }
-.explain h3 { font-size: 15px; margin: 18px 0 4px; }
-.explain h3:first-child { margin-top: 0; }
-.explain p, .explain li { color: var(--label2); margin: 4px 0; }
-.explain b { color: var(--label); }
-.explain ul { padding-left: 18px; margin: 4px 0; }
-.modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--sep); border-radius: var(--r-group); overflow: hidden; margin-top: 10px; }
-@media (max-width: 700px) { .modes { grid-template-columns: 1fr; } }
-.modes div { background: var(--group); padding: 14px 16px; font-size: 13px; color: var(--label2); }
-.modes div b { display: block; color: var(--label); font-size: 15px; margin-bottom: 4px; }
-
-.log { font-size: 13px; max-height: 220px; overflow: auto; }
-.log .row { grid-template-columns: 64px 1fr; padding: 8px 16px; }
-.log .t { color: var(--label3); font-variant-numeric: tabular-nums; }
-.log .bad { color: var(--red); }
-.log .warn { color: var(--orange); }
-
-.toast {
-  position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0;
-  background: color-mix(in srgb, var(--label) 88%, transparent); color: var(--bg);
-  padding: 10px 18px; border-radius: 980px; font-size: 14px; font-weight: 500;
-  transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100vw - 32px);
-}
-.toast.show { opacity: 1; transform: translate(-50%, 0); }
-a { color: var(--blue); }
-
-/* ---------- lap tuner hero ---------- */
-.tuner { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 8px 24px; padding: 20px; }
-@media (max-width: 880px) { .tuner { grid-template-columns: 1fr; } }
+/* lap tuner tab */
 .tuner-map svg { width: 100%; height: auto; display: block; }
-.seg-path { fill: none; stroke-width: 22; stroke-linecap: butt; stroke: var(--fill); transition: stroke .4s; }
-.seg-path.passed { stroke: color-mix(in srgb, var(--green) 70%, var(--fill)); }
-.seg-path.checking { stroke: color-mix(in srgb, var(--blue) 55%, var(--fill)); }
-.seg-path.held { stroke: color-mix(in srgb, var(--orange) 75%, var(--fill)); }
-.seg-path.failed { stroke: color-mix(in srgb, var(--red) 70%, var(--fill)); }
-.tape { fill: none; stroke: var(--tape); stroke-width: 3; opacity: .9; }
-.map-lbl { font-size: 12px; fill: var(--label2); font-weight: 500; }
-.map-lap { font-size: 26px; font-weight: 700; fill: var(--label); letter-spacing: -.02em; }
-.map-sub { font-size: 13px; fill: var(--label2); }
-#car { fill: var(--label); stroke: var(--group); stroke-width: 3; transition: cx .35s ease, cy .35s ease; }
+.seg-path { fill: none; stroke-width: 20; stroke: var(--surface2); transition: stroke .4s; }
+.seg-path.passed { stroke: color-mix(in srgb, var(--green) 65%, var(--surface2)); }
+.seg-path.checking { stroke: color-mix(in srgb, var(--accent) 60%, var(--surface2)); }
+.seg-path.held { stroke: color-mix(in srgb, var(--orange) 70%, var(--surface2)); }
+.seg-path.failed { stroke: color-mix(in srgb, var(--red) 70%, var(--surface2)); }
+.tape { fill: none; stroke: var(--tape); stroke-width: 2.5; opacity: .9; }
+.map-lbl { font-size: 12px; fill: var(--muted); }
+.map-lap { font-size: 24px; font-weight: 700; fill: var(--text); }
+.map-sub { font-size: 12px; fill: var(--muted); }
+#car { fill: var(--text); stroke: var(--surface); stroke-width: 3; transition: cx .35s ease, cy .35s ease; }
 #car.off { opacity: .25; }
-@media (prefers-reduced-motion: reduce) { #car, .seg-path { transition: none; } }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--label2); margin-top: 6px; align-items: center; }
-.legend .lg { display: inline-block; width: 14px; height: 6px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
-.lg.passed { background: var(--green); } .lg.checking { background: var(--blue); } .lg.held { background: var(--orange); }
-.legend .note { flex-basis: 100%; color: var(--label3); }
-.tuner-side { display: flex; flex-direction: column; gap: 14px; }
-.tuner-side h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -.02em; }
-.tuner-side .status { font-size: 14px; color: var(--label2); min-height: 40px; }
-.tuner-side .status b { color: var(--label); }
-.speeds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.spd { background: var(--fill); border-radius: 12px; padding: 10px 14px; display: flex; flex-direction: column; }
-.spd .k { font-size: 13px; font-weight: 600; }
-.spd.straight .k { color: var(--blue); } .spd.corner .k { color: var(--tape); }
-.spd .big { font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
-.spd .sub { font-size: 12px; color: var(--label2); }
-.laps { overflow-x: auto; }
-.laps table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
-.laps th { text-align: left; font-weight: 500; font-size: 12px; color: var(--label2); padding: 10px 12px 6px; white-space: nowrap; }
-.laps td { padding: 9px 12px; border-top: .5px solid var(--sep); vertical-align: top; }
-.laps td.change { color: var(--label2); min-width: 220px; }
-.laps .empty-row { color: var(--label2); }
-.res { display: inline-block; padding: 1px 9px; border-radius: 980px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--muted); margin: 4px 0 14px; }
+.legend i { display: inline-block; width: 12px; height: 5px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+.lg-p { background: var(--green); } .lg-c { background: var(--accent); } .lg-h { background: var(--orange); }
+.status { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+.status b { color: var(--text); }
+.speeds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.spd { border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 10px 12px; }
+.spd .k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.spd.straight .k { color: #7CC0FF; } .spd.corner .k { color: var(--tape); }
+.spd .big { display: block; font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
+.spd .sub { font-size: 11.5px; color: var(--muted); }
+.stepsel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+.laps-tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+.laps-tbl table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.laps-tbl th { text-align: left; font-weight: 500; font-size: 11px; color: var(--muted); padding: 8px 10px; white-space: nowrap; }
+.laps-tbl td { padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+.laps-tbl td.change { color: var(--muted); min-width: 160px; }
+.res { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .res.passed { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
-.res.retune { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
+.res.retune { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .res.limit { background: color-mix(in srgb, var(--orange) 20%, transparent); color: var(--orange); }
-.hero { margin-top: 18px; }
-.hud-panel { display: flex; flex-direction: column; }
-.hud-panel .log { flex: 1; max-height: 260px; }
-.hud { border-top: 0; }
 
-/* ---------- guide + timer ---------- */
-.guide { list-style: none; margin: 0 0 14px; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; counter-reset: g; }
-@media (max-width: 760px) { .guide { grid-template-columns: 1fr 1fr; } }
-.guide li { counter-increment: g; background: var(--group); border-radius: 12px; padding: 10px 12px 10px 44px; position: relative; font-size: 13px; color: var(--label2); border: 1.5px solid transparent; }
-.guide li::before { content: counter(g); position: absolute; left: 12px; top: 10px; width: 22px; height: 22px; border-radius: 50%; background: var(--fill); color: var(--label2); font-weight: 700; font-size: 12px; display: grid; place-items: center; }
-.guide li b { display: block; color: var(--label); font-size: 14px; font-weight: 600; }
-.guide li.done::before { content: "\2713"; background: var(--green); color: #fff; }
-.guide li.next { border-color: var(--blue); }
-.guide li.next::before { background: var(--blue); color: #fff; }
-.timer { display: grid; grid-template-columns: 1.4fr repeat(4, 1fr) auto; gap: 1px; background: var(--sep); border-radius: 16px; overflow: hidden; margin-bottom: 18px; align-items: stretch; }
-@media (max-width: 760px) { .timer { grid-template-columns: 1fr 1fr; } }
-.tcell { background: var(--group); padding: 12px 16px; display: flex; flex-direction: column; }
-.tcell .k { font-size: 12px; color: var(--label2); font-weight: 500; }
-.tcell .tv { font-size: 26px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; }
-.tcell.main .tv { font-size: 34px; }
-.tcell .ts { font-size: 12px; color: var(--label2); }
-.small-btn { border-radius: 0; background: var(--group); font-size: 13px; padding: 0 16px; }
+/* activity + guide */
+.log .item { display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+.log .item:first-child { border-top: 0; }
+.log .t { color: var(--faint); font-variant-numeric: tabular-nums; }
+.log .bad { color: var(--red); } .log .warn { color: var(--orange); }
+.guide h3 { font-size: 14px; margin: 18px 0 4px; } .guide h3:first-child { margin-top: 0; }
+.guide p, .guide li { color: var(--muted); font-size: 13px; margin: 4px 0; }
+.guide b { color: var(--text); }
+.guide ol, .guide ul { padding-left: 18px; margin: 4px 0; }
+
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 16px); opacity: 0; z-index: 40;
+  background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 550;
+  transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100vw - 32px); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
 </style>
 </head>
 <body>
 <header class="bar">
-  <h1>Lap Tuner</h1>
+  <span class="brand">PiRacer</span>
   <span class="source"><span class="dot" id="srcDot"></span><span id="srcText">Connecting…</span></span>
   <span class="spacer"></span>
-  <div class="seg" role="group" aria-label="Driving mode">
+  <div class="seg" role="group" aria-label="Driving mode" id="modeSeg">
     <button data-mode="user" aria-pressed="false">Manual</button>
     <button data-mode="local_angle" aria-pressed="false">Pilot steers</button>
     <button data-mode="local" aria-pressed="false">Full Auto</button>
   </div>
-  <button class="stop" id="stop">Stop</button>
+  <button class="stop" id="stop" title="Stop (Space)">STOP</button>
+  <button class="icon-btn" id="menuBtn" aria-controls="drawer" aria-expanded="false" title="Settings">
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+    <span>Settings</span><i class="badge" id="unsavedBadge" hidden></i>
+  </button>
 </header>
 
 <main>
-  <ol class="guide" id="guide" aria-label="What to do next">
-    <li data-step="place"><b>Put the car on the line</b><span>The camera has to see the orange line.</span></li>
-    <li data-step="auto"><b>Switch to Full Auto</b><span>Top right. The car drives itself from here.</span></li>
-    <li data-step="start"><b>Start the lap tuner</b><span>It drives the race values first, then speeds up after clean laps and stops at each section's limit.</span></li>
-    <li data-step="save"><b>Save on car</b><span>Keeps the settings it found after a restart.</span></li>
-  </ol>
-
-  <section class="timer" aria-label="Lap timer">
-    <div class="tcell main"><span class="k">This lap</span><span class="tv num" id="tCur">—</span><span class="ts" id="tCurSub">waiting for Full Auto</span></div>
-    <div class="tcell"><span class="k" id="tLastK">Last lap</span><span class="tv num" id="tLast">—</span><span class="ts" id="tLastSub"></span></div>
-    <div class="tcell"><span class="k">Best lap</span><span class="tv num" id="tBest">—</span><span class="ts">fastest so far</span></div>
-    <div class="tcell"><span class="k" id="tRaceK">10-lap race</span><span class="tv num" id="tRace">—</span><span class="ts" id="tRaceSub"></span></div>
-    <div class="tcell"><span class="k">Line lost</span><span class="tv num" id="tLost">—</span><span class="ts">times this lap</span></div>
-    <button class="btn small-btn" id="tReset" title="Start counting laps from zero">Reset timer</button>
+  <section class="stage" aria-label="Live camera">
+    <img id="cam" alt="Live camera with the detected line drawn over it">
+    <div class="empty" id="camEmpty" hidden>No camera frames yet</div>
+    <div class="hud-top">
+      <span class="chip unknown" id="hSect">—</span>
+    </div>
+    <div class="hud-bottom">
+      <div><div class="k">Throttle</div><div class="v num" id="hThr">—</div></div>
+      <div><div class="k">Steering</div><div class="v num" id="hSteer">—</div><div class="steerbar"><i id="hSteerBar"></i></div></div>
+      <div><div class="k">Curve radius</div><div class="v num" id="hCurv">—</div></div>
+    </div>
   </section>
-  <section class="panel tuner">
+
+  <section class="laps-strip" aria-label="Lap timer">
+    <div class="stat main"><div class="k">This lap</div><div class="v num" id="tCur">—</div><div class="s" id="tCurSub">waiting for Full Auto</div></div>
+    <div class="stat"><div class="k" id="tLastK">Last lap</div><div class="v num" id="tLast">—</div><div class="s" id="tLastSub"></div></div>
+    <div class="stat"><div class="k">Best</div><div class="v num" id="tBest">—</div><div class="s">fastest so far</div></div>
+    <div class="stat"><div class="k" id="tRaceK">10-lap race</div><div class="v num" id="tRace">—</div><div class="s" id="tRaceSub"></div></div>
+    <div class="stat"><div class="k">Line lost</div><div class="v num" id="tLost">—</div><div class="s">this lap</div></div>
+    <button class="ghost" id="tReset" title="Start counting laps from zero">Reset timer</button>
+  </section>
+
+  <section class="quick" aria-label="Presets">
+    <span class="lbl">Preset</span>
+    <span id="presetChips"></span>
+    <span class="spacer"></span>
+    <button class="ghost" id="saveQuick" title="Keep the current settings after a restart">Save on car</button>
+  </section>
+</main>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Settings" aria-hidden="true">
+  <div class="dhead"><h2>Settings</h2><button class="close" id="closeBtn" aria-label="Close">✕</button></div>
+  <div class="tabs" role="tablist">
+    <button role="tab" data-tab="tTune" aria-selected="true">Tuning</button>
+    <button role="tab" data-tab="tTuner" aria-selected="false">Lap tuner</button>
+    <button role="tab" data-tab="tLog" aria-selected="false">Activity</button>
+    <button role="tab" data-tab="tGuide" aria-selected="false">Guide</button>
+  </div>
+
+  <div class="dbody" id="tTune" role="tabpanel">
+    <input class="filter" id="filter" type="search" placeholder="Find a setting…" aria-label="Find a setting">
+    <div class="sec-h">Presets</div>
+    <div class="presets" id="gPresets"></div>
+    <div class="sec-h">All settings · changes apply to the car immediately</div>
+    <details class="grp" open><summary>Speed <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">0 = stopped, 1 = full throttle at the motor PWM below.</div><div id="gSpeed"></div></details>
+    <details class="grp"><summary>Steering law <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">Pure pursuit aims at a point on the line ahead. Off = PD steering on one image row.</div><div id="gLaw"></div></details>
+    <details class="grp"><summary>Curve handling <i class="dirty"></i><span class="count"></span></summary><div id="gCurve"></div></details>
+    <details class="grp"><summary>PD steering <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">KP = how hard it steers back to the line. KD = how much it damps the wobble.</div><div id="gSteer"></div></details>
+    <details class="grp"><summary>Lap timer <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">No start line: a lap is counted from straight/curve changes.</div><div id="gTimer"></div></details>
+    <details class="grp"><summary>Lap tuner rules <i class="dirty"></i><span class="count"></span></summary><div id="gRules"></div></details>
+    <details class="grp"><summary>Limits <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">Hard caps. The pilot never exceeds these.</div><div id="gLimits"></div></details>
+    <details class="grp"><summary>Line detection <i class="dirty"></i><span class="count"></span></summary><div id="gDetect"></div></details>
+    <details class="grp"><summary>When the line is lost <i class="dirty"></i><span class="count"></span></summary><div id="gSafety"></div></details>
+    <details class="grp"><summary>Getting moving <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">Only used when the speed plan is off (straight throttle 0).</div><div id="gCrawl"></div></details>
+  </div>
+
+  <div class="dbody" id="tTuner" role="tabpanel" hidden>
     <div class="tuner-map">
       <svg viewBox="0 0 400 220" role="img" aria-labelledby="mapTitle" id="map">
         <title id="mapTitle">Track map: straights and curves with their tuning state</title>
@@ -272,146 +314,77 @@ a { color: var(--blue); }
         <text class="map-lbl" x="8" y="114" id="mapC2">curve</text>
         <text class="map-lap" x="200" y="104" text-anchor="middle" id="mapLap">Lap —</text>
         <text class="map-sub" x="200" y="128" text-anchor="middle" id="mapSub">not running</text>
-        <circle id="car" r="9" cx="200" cy="184"/>
+        <circle id="car" r="8" cx="200" cy="184"/>
       </svg>
-      <div class="legend"><span><i class="lg passed"></i>Passed</span><span><i class="lg checking"></i>Checking</span><span><i class="lg held"></i>At its limit</span><span class="note">Schematic of the Waveshare track (two long curves, two short straights). The car's position is counted from straight/curve changes.</span></div>
     </div>
-    <div class="tuner-side">
-      <h2>Lap-by-lap tuner</h2>
-      <div class="status" id="rampStatus">Pick Full Auto, put the car on the line, then start.</div>
-      <div class="speeds">
-        <div class="spd straight"><span class="k">Straight</span><span class="big num" id="lsNow">—</span><span class="sub" id="lsFoot">KP —</span></div>
-        <div class="spd corner"><span class="k">Curve</span><span class="big num" id="lcNow">—</span><span class="sub" id="lcFoot">KP —</span></div>
-      </div>
-      <div class="status" id="estLine" style="min-height:0"></div>
-      <div class="stepsel">
-        <span>Faster each lap by</span>
-        <div class="seg" role="group" aria-label="Step size" id="stepSeg">
-          <button data-step="0.02" aria-pressed="false">0.02</button>
-          <button data-step="0.04" aria-pressed="false">0.04</button>
-          <button data-step="0.06" aria-pressed="false">0.06</button>
-        </div>
-        <span id="stepNote">on straights, less on curves (sliders under Pass and fail rules)</span>
-      </div>
-      <div class="actions">
-        <button class="btn primary" id="rampStart">Start lap tuner</button>
-        <button class="btn" id="holdCurve" disabled>Curve too fast</button>
-        <button class="btn" id="holdStraight" disabled>Straight too fast</button>
-        <button class="btn danger" id="rampEnd" disabled>End &amp; keep last good</button>
-      </div>
+    <div class="legend"><span><i class="lg-p"></i>Passed</span><span><i class="lg-c"></i>Checking</span><span><i class="lg-h"></i>At its limit</span></div>
+    <p class="status" id="rampStatus">Pick Full Auto, put the car on the line, then start.</p>
+    <div class="speeds">
+      <div class="spd straight"><span class="k">Straight</span><span class="big num" id="lsNow">—</span><span class="sub" id="lsFoot">KP —</span></div>
+      <div class="spd corner"><span class="k">Curve</span><span class="big num" id="lcNow">—</span><span class="sub" id="lcFoot">KP —</span></div>
     </div>
-  </section>
-
-  <div class="group-h"><strong>Laps</strong>Each lap checks at least one straight and one curve. A clean lap makes the next one faster.</div>
-  <div class="group laps">
-    <table>
-      <thead><tr><th>Lap</th><th>Straight</th><th>Curve</th><th>Straight KP · KD</th><th>Curve KP · KD</th><th>Result</th><th>What changed</th></tr></thead>
-      <tbody id="lapRows"><tr><td colspan="7" class="empty-row">No laps yet. Start the lap tuner in Full Auto.</td></tr></tbody>
-    </table>
-  </div>
-
-  <section class="hero">
-    <div class="panel">
-      <div class="cam">
-        <img id="cam" alt="Live camera with the detected line drawn over it">
-        <div class="empty" id="camEmpty" hidden>No camera frames yet</div>
+    <p class="status" id="estLine"></p>
+    <div class="stepsel">
+      <span>Faster each lap by</span>
+      <div class="seg" role="group" aria-label="Step size" id="stepSeg">
+        <button data-step="0.02" aria-pressed="false">0.02</button>
+        <button data-step="0.04" aria-pressed="false">0.04</button>
+        <button data-step="0.06" aria-pressed="false">0.06</button>
       </div>
+      <span id="stepNote">on straights, less on curves</span>
     </div>
-    <div class="panel hud-panel">
-      <div class="hud">
-        <div><div class="k">Section</div><div class="v"><span class="sect-pill unknown" id="hSect">—</span></div></div>
-        <div><div class="k">Throttle</div><div class="v num" id="hThr">—</div></div>
-        <div><div class="k">Steering</div><div class="v num" id="hSteer">—</div></div>
-        <div><div class="k">Curve radius</div><div class="v num" id="hCurv">—</div></div>
-      </div>
-      <div class="group-h" style="margin:14px 16px 6px"><strong style="font-size:15px">Activity</strong></div>
-      <div class="log" id="log"><div class="row"><span></span><span style="color:var(--label2)">Nothing yet.</span></div></div>
+    <div class="actions">
+      <button class="btn primary" id="rampStart">Start lap tuner</button>
+      <button class="btn" id="holdCurve" disabled>Curve too fast</button>
+      <button class="btn" id="holdStraight" disabled>Straight too fast</button>
+      <button class="btn danger" id="rampEnd" disabled>End &amp; keep last good</button>
     </div>
-  </section>
-
-  <div class="cols">
-    <div>
-      <div class="group-h"><strong>Speed</strong>How fast the car drives itself. 0 = stopped, 1 = full throttle. Changes apply to the car immediately.</div>
-      <div class="group" id="gSpeed"></div>
-
-      <div class="group-h"><strong>Steering law</strong>Pure pursuit aims at a point on the line ahead. Off = PD steering on one image row, as driven on Nov 9.</div>
-      <div class="group" id="gLaw"></div>
-      <div class="group-f">Pure pursuit won in the simulator but has not been driven on the real car yet. If it misbehaves, press <b>PD fallback</b>.</div>
-
-      <div class="group-h"><strong>Curve handling</strong>How the car spots a curve ahead and where it rides.</div>
-      <div class="group" id="gCurve"></div>
-      <div class="group-f">Feedforward and corner planning use model values that haven't been measured on the real track yet. Raise them gradually.</div>
-
-      <div class="group-h"><strong>Pass and fail rules</strong>What counts as a clean lap, a line failure, a curve failure or a weave. Changes apply to the next check.</div>
-      <div class="group" id="gRules"></div>
-    </div>
-    <div>
-      <div class="group-h"><strong>Steering</strong>KP = how hard it steers back toward the line. KD = how much it calms the steering so it doesn\u2019t wobble.</div>
-      <div class="group" id="gSteer"></div>
-      <div class="group-h"><strong>Presets</strong>One tap puts a whole setup on the car. The numbers come from line_config.py on the car. Press Save on car to keep one.</div>
-      <div class="group" id="gPresets"></div>
-
-      <div class="group-h"><strong>Lap timer</strong>There's no start line, so a lap is counted from straight/curve changes.</div>
-      <div class="group" id="gTimer"></div>
-
-      <details class="more">
-        <summary>Limits, line detection and safety</summary>
-        <div class="group-h"><strong>Limits</strong>Hard caps. The pilot never exceeds these.</div>
-        <div class="group" id="gLimits"></div>
-        <div class="group-h"><strong>Line detection</strong></div>
-        <div class="group" id="gDetect"></div>
-        <div class="group-h"><strong>When the line is lost</strong></div>
-        <div class="group" id="gSafety"></div>
-        <div class="group-h"><strong>Getting moving</strong>Only used when the speed plan is off (straight throttle 0).</div>
-        <div class="group" id="gCrawl"></div>
-      </details>
+    <div class="sec-h">Laps</div>
+    <div class="laps-tbl">
+      <table>
+        <thead><tr><th>Lap</th><th>Straight</th><th>Curve</th><th>Str KP·KD</th><th>Crv KP·KD</th><th>Result</th><th>What changed</th></tr></thead>
+        <tbody id="lapRows"><tr><td colspan="7" style="color:var(--muted)">No laps yet. Start the lap tuner in Full Auto.</td></tr></tbody>
+      </table>
     </div>
   </div>
 
-  <div class="savebar">
+  <div class="dbody" id="tLog" role="tabpanel" hidden>
+    <div class="log" id="log"><div class="item"><span></span><span style="color:var(--muted)">Nothing yet.</span></div></div>
+  </div>
+
+  <div class="dbody guide" id="tGuide" role="tabpanel" hidden>
+    <h3>Race day</h3>
+    <ol>
+      <li>Put the car on the line and check the camera: the orange line must be tracked (<b>Straight</b> or <b>Curve</b> top left).</li>
+      <li>Tap <b>First slow lap</b>, then <b>Full Auto</b>. Watch one lap.</li>
+      <li>Tap <b>Race</b>. If it runs wide, tap <b>Safe race</b>.</li>
+      <li><b>Save on car</b> keeps the settings after a restart. <b>STOP</b> or Space returns to Manual at zero throttle.</li>
+    </ol>
+    <h3>Modes</h3>
+    <p><b>Manual</b>: you drive with the gamepad. <b>Pilot steers</b>: the pilot steers, you give throttle. <b>Full Auto</b>: the pilot steers and sets speed; gamepad sticks take over instantly, Y is emergency stop.</p>
+    <h3>How it steers</h3>
+    <p><b>Pure pursuit</b> (default) projects the line onto the ground, shifts it to where the car should ride, and steers the arc to a point ahead. <b>PD steering</b> (fallback) steers in proportion to how far the line sits from its target on one image row.</p>
+    <h3>Lap tuner</h3>
+    <ul>
+      <li>Drives laps, scoring each straight and curve (tracking, weave, lag). After clean laps it speeds up one step on straights, half a step on curves.</li>
+      <li>A failing section drops back to its last clean speed minus a safety margin and is held; the other keeps climbing.</li>
+      <li>If the line is lost the car stops. Put it back and pick <b>Full Auto</b> to continue. Save on car when it finishes.</li>
+    </ul>
+    <p style="margin-top:18px"><a href="/classic">Classic dashboard</a> for diagnostics, the simulator and recorded runs.</p>
+  </div>
+
+  <div class="dfoot">
     <button class="btn primary" id="save">Save on car</button>
     <button class="btn" id="revert">Reset to defaults</button>
-    <span id="saveNote">Slider changes take effect right away. Save on car keeps them after a restart.</span>
+    <span class="note" id="saveNote">Changes apply right away. Save on car keeps them after a restart.</span>
   </div>
-
-
-  <div class="group-h"><strong>How this works</strong></div>
-  <div class="explain">
-    <h3>The goal</h3>
-    <p>Follow the left orange line around the stage track faster than a human lap (about 3.4 s). The camera finds the line's inside edge; the pilot steers to keep it at the target position.</p>
-    <h3>Two kinds of track</h3>
-    <p>The pilot measures how much the line bends ahead and labels each moment <b>Straight</b> or <b>Curve</b>. On straights it runs at straight throttle; entering a curve it brakes to curve throttle.</p>
-    <h3>How it steers</h3>
-    <p><b>Pure pursuit</b> (the default) turns the line it sees into points on the ground, moves them sideways to where the car should ride, picks the point a lookahead distance ahead and steers the arc that reaches it. <b>PD steering</b> (the fallback) steers in proportion to how far the line sits from its target on one image row; KP and KD only matter there, or when the PD share is above 0.</p>
-    <h3>The speed ramp</h3>
-    <ul>
-      <li>Start first puts the <b>race values</b> on the car and checks them. It reports the lap time and the race total (an estimate until laps have been timed).</li>
-      <li>It drives laps and scores each straight and each curve: is the line tracked, is it weaving, is the steering lagging.</li>
-      <li>After two clean laps in a row at a speed (adjustable), straight throttle goes up one step and curve throttle half a step.</li>
-      <li>If a section weaves or lags it adjusts that section's KP/KD and checks again.</li>
-      <li>When a section fails (line lost, health check fails, or you press <b>Curve too fast</b> / <b>Straight too fast</b>) it drops back to the last clean speed, minus a one-step safety margin (adjustable), and holds it there. The other section keeps climbing.</li>
-      <li>If the line is lost the car stops. Put it back and pick <b>Full Auto</b>; it continues from the next step.</li>
-      <li>It finishes when both sections are held or hit the Full Auto limit. Then press <b>Save on car</b>.</li>
-    </ul>
-    <div class="modes">
-      <div><b>Manual</b>You drive with the gamepad. Use it to place the car.</div>
-      <div><b>Pilot steers</b>The pilot steers, you control throttle. Good for checking steering before going fast.</div>
-      <div><b>Full Auto</b>The pilot steers and sets speed. The ramp only runs here. Gamepad sticks take over instantly; Y is emergency stop.</div>
-    </div>
-    <h3>What would make it faster</h3>
-    <ul>
-      <li><b>Track measurements</b> (lane width, curve radii, straight lengths) let the curve detector and feedforward use real numbers instead of guesses.</li>
-      <li><b>Measured steering angle</b> at full lock makes feedforward accurate, so the PD loop only fixes small errors.</li>
-      <li><b>Timed runs at a few throttles</b> would replace the assumed speed table, so the lap estimate and the speed-scaled lookahead use real speeds.</li>
-    </ul>
-  </div>
-  <p class="group-f" style="margin-top:18px"><a href="/classic">Open the classic dashboard</a> for diagnostics, the simulator and recorded runs.</p>
-</main>
+</aside>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const fmt = (v, d = 2) => (v == null || !isFinite(v)) ? '—' : (+v).toFixed(d);
+const esc = v => String(v ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let toastT;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
 async function api(path, body) {
@@ -420,6 +393,18 @@ async function api(path, body) {
   if (!r.ok || j.error) throw new Error(j.error || r.statusText);
   return j;
 }
+
+/* ---------- drawer ---------- */
+function openDrawer(open) {
+  $('drawer').classList.toggle('open', open); $('scrim').classList.toggle('open', open);
+  $('drawer').setAttribute('aria-hidden', String(!open)); $('menuBtn').setAttribute('aria-expanded', String(open));
+}
+$('menuBtn').onclick = () => openDrawer(!$('drawer').classList.contains('open'));
+$('closeBtn').onclick = $('scrim').onclick = () => openDrawer(false);
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', String(x === b)));
+  for (const id of ['tTune', 'tTuner', 'tLog', 'tGuide']) $(id).hidden = id !== b.dataset.tab;
+});
 
 /* ---------- settings groups ---------- */
 const GROUPS = {
@@ -450,11 +435,11 @@ const HELP = {
   speed_transition: 'Speed while a bend is building.',
   straight_kp: 'Lower = calmer on straights. Raise if it drifts off the line.',
   corner_kp: 'Higher = turns in harder. Above 3.5 caused curve crashes in the simulator; steering is already at full lock in most curves.',
-  ff_gain: 'Only with PD steering: adds steering for the bend it sees ahead. 0 = off. In the simulator it ran wide at curve exits above 0.90 throttle.',
+  ff_gain: 'Only with PD steering: adds steering for the bend it sees ahead. 0 = off.',
   lookahead_ratio: 'Image row PD steering measures on. Lower = looks further ahead (reacts earlier, cuts corners more).',
-  target_x_ratio: 'Where the line\u2019s inside edge sits across the image. Higher = the car rides closer to the inside line. 0.40 for both steering laws (Nov 10; 0.42+ ran wide with extra delay in the simulator, and PD at 0.46 ran onto the left tape).',
+  target_x_ratio: 'Where the line’s inside edge sits across the image. Higher = the car rides closer to the inside line. 0.40 for both steering laws.',
   max_auto: 'Highest throttle Full Auto and the ramp can use.',
-  max_steering: 'Keep at 1.0 = full left lock (PWM 450, about 18\u00b0 of wheel angle, fitted to recorded runs). At 0.8 the recorded runs lost the line 58% of the time in the tightest curves.',
+  max_steering: 'Keep at 1.0 = full left lock (about 18° of wheel angle). At 0.8 the recorded runs lost the line 58% of the time in the tightest curves.',
   corner_exit_steer: 'Stays in curve steering and speed until the wheel unwinds below this. Stops it speeding up and running wide at curve exits.',
 };
 let knobs = {}, spec = {};
@@ -464,12 +449,13 @@ function makeRow(id, label) {
   const row = document.createElement('div'); row.className = 'row'; row.dataset.id = id;
   const isBool = s.min === 0 && s.max === 1 && s.step === 1;
   const help = HELP[id] || s.help || '';
+  row.dataset.search = (label + ' ' + id + ' ' + help).toLowerCase();
   if (isBool) {
-    row.innerHTML = `<label class="lbl" for="k_${id}">${label}</label><span class="switch"><input type="checkbox" id="k_${id}"><span></span></span>${help ? `<span class="help">${help}</span>` : ''}`;
+    row.innerHTML = `<label class="lbl" for="k_${id}">${esc(label)}</label><span class="switch"><input type="checkbox" id="k_${id}"><span></span></span>${help ? `<span class="help">${esc(help)}</span>` : ''}`;
     row.querySelector('input').onchange = e => send(id, e.target.checked ? 1 : 0);
   } else {
-    row.innerHTML = `<label class="lbl" for="n_${id}">${label}</label><span class="val"><input type="number" class="num" id="n_${id}" min="${s.min}" max="${s.max}" step="${s.step}"></span>`
-      + `<input type="range" id="k_${id}" min="${s.min}" max="${s.max}" step="${s.step}" aria-label="${label}">${help ? `<span class="help">${help}</span>` : ''}`;
+    row.innerHTML = `<label class="lbl" for="n_${id}">${esc(label)}</label><input type="number" class="num" id="n_${id}" min="${s.min}" max="${s.max}" step="${s.step}">`
+      + `<input type="range" id="k_${id}" min="${s.min}" max="${s.max}" step="${s.step}" aria-label="${esc(label)}">${help ? `<span class="help">${esc(help)}</span>` : ''}`;
     const n = row.querySelector('input[type=number]'), r = row.querySelector('input[type=range]');
     r.oninput = () => { n.value = r.value; queue(id, +r.value); };
     n.onchange = () => { r.value = n.value; queue(id, +n.value, 0); };
@@ -486,7 +472,7 @@ async function flush() {
   try {
     const r = await api('/api/knobs', body);
     for (const [k, v] of Object.entries(r.applied || {})) { knobs[k] = v; paint(k, Object.prototype.hasOwnProperty.call(body, k)); }
-    syncStep();
+    syncStep(); markGroups();
     const clipped = Object.entries(body).filter(([k, v]) => r.applied && r.applied[k] != null && Math.abs(r.applied[k] - v) > 1e-6);
     if (clipped.length) toast(clipped.map(([k]) => `${labelOf(k)} limited to ${r.applied[k]}`).join(' · '));
     markUnsaved();
@@ -505,8 +491,12 @@ function paint(id, flash) {
   row.classList.toggle('changed', spec[id] && spec[id].default != null && Math.abs(v - spec[id].default) > 1e-6);
   if (flash) { row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 500); }
 }
-let unsaved = false, savedSinceRun = false;
-function markUnsaved() { unsaved = true; $('saveNote').textContent = 'Changed on the car now. Save on car to keep after a restart.'; }
+function markGroups() {
+  document.querySelectorAll('details.grp').forEach(d => d.classList.toggle('has-changed', !!d.querySelector('.row.changed')));
+}
+let savedSinceRun = false;
+function markUnsaved() { $('unsavedBadge').hidden = false; $('saveNote').textContent = 'Changed on the car now. Save on car to keep after a restart.'; }
+function markSaved() { $('unsavedBadge').hidden = true; $('saveNote').textContent = 'Saved on the car.'; }
 async function load() {
   const s = await api('/api/state');
   spec = {}; knobs = {};
@@ -515,41 +505,62 @@ async function load() {
     for (const [gid, rows] of Object.entries(GROUPS)) {
       const g = $(gid); g.innerHTML = '';
       for (const [id, label] of rows) { const r = makeRow(id, label); if (r) g.append(r); }
+      const c = g.closest('details')?.querySelector('.count'); if (c) c.textContent = g.children.length;
     }
     load.built = true;
   }
   for (const id in knobs) paint(id);
+  markGroups();
   renderPresets(s.presets);
   syncStep();
   return s;
 }
 
+/* filter settings */
+$('filter').oninput = () => {
+  const q = $('filter').value.trim().toLowerCase();
+  document.querySelectorAll('details.grp').forEach(d => {
+    let any = false;
+    d.querySelectorAll('.row').forEach(r => { const hit = !q || r.dataset.search.includes(q); r.hidden = !hit; any ||= hit; });
+    d.hidden = !!q && !any;
+    if (q) d.open = any;
+  });
+};
+
+/* ---------- presets ---------- */
+let activePreset = null;
 function renderPresets(list) {
-  const g = $('gPresets'); g.innerHTML = '';
+  const g = $('gPresets'), chips = $('presetChips'); g.innerHTML = ''; chips.innerHTML = '';
   for (const p of list || []) {
-    const row = document.createElement('div'); row.className = 'row action'; row.tabIndex = 0; row.setAttribute('role', 'button');
-    const est = p.estimate ? ` Estimated lap ${fmt(p.estimate.lap_s)} s, ${p.estimate.laps} laps ${fmt(p.estimate.total_s, 1)} s.` : '';
-    row.innerHTML = `<span class="lbl">${esc(p.label)}</span><span class="help">${esc(p.help + est)}</span>`;
+    const est = p.estimate ? `≈ ${fmt(p.estimate.lap_s)} s` : '';
     const run = async () => {
       try { const r = await api('/api/preset', { name: p.id }); for (const [k, v] of Object.entries(r.applied || {})) { knobs[k] = v; paint(k, true); }
-        markUnsaved(); toast(`${p.label} applied`); pollLaps(); } catch (e) { toast(e.message); }
+        activePreset = p.id; markActive(); markGroups(); markUnsaved(); toast(`${p.label} applied`); pollLaps(); } catch (e) { toast(e.message); }
     };
-    row.onclick = run; row.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); run(); } };
-    g.append(row);
+    const c = document.createElement('button'); c.className = 'pchip'; c.dataset.id = p.id; c.title = p.help + (p.estimate ? ` Estimated lap ${fmt(p.estimate.lap_s)} s.` : '');
+    c.innerHTML = `${esc(p.label)}`; c.onclick = run; chips.append(c);
+    const b = document.createElement('button'); b.className = 'preset';
+    b.innerHTML = `<b>${esc(p.label)}</b><span>${esc(p.help)}${est ? ` Estimated lap ${esc(est)}.` : ''}</span>`; b.onclick = run; g.append(b);
   }
+  markActive();
 }
-$('save').onclick = async () => { try { await api('/api/save', {}); unsaved = false; savedSinceRun = true; $('saveNote').textContent = 'Saved on the car.'; toast('Saved on car'); } catch (e) { toast(e.message); } };
+function markActive() { document.querySelectorAll('.pchip').forEach(c => c.classList.toggle('active', c.dataset.id === activePreset)); }
+async function save() { try { await api('/api/save', {}); savedSinceRun = true; markSaved(); toast('Saved on car'); } catch (e) { toast(e.message); } }
+$('save').onclick = save; $('saveQuick').onclick = save;
 $('revert').onclick = async () => {
   if (!confirm('Reset every setting to the defaults in line_config.py and delete the saved file?')) return;
-  try { await api('/api/revert', {}); await load(); toast('Reset to defaults'); } catch (e) { toast(e.message); }
+  try { await api('/api/revert', {}); activePreset = null; await load(); markSaved(); toast('Reset to defaults'); } catch (e) { toast(e.message); }
 };
 
 /* ---------- mode + stop ---------- */
-document.querySelectorAll('.bar .seg button').forEach(b => b.onclick = async () => {
+document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = async () => {
   try { await api('/api/mode', { mode: b.dataset.mode }); } catch (e) { toast(e.message); }
 });
 $('stop').onclick = async () => { try { await api('/api/estop', {}); toast('Stopped'); } catch (e) { toast(e.message); } };
-document.addEventListener('keydown', e => { if (e.key === ' ' && !/INPUT|BUTTON/.test(document.activeElement.tagName)) { e.preventDefault(); $('stop').click(); } });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') openDrawer(false);
+  if (e.key === ' ' && !/INPUT|BUTTON|SUMMARY/.test(document.activeElement.tagName)) { e.preventDefault(); $('stop').click(); }
+});
 
 /* ---------- telemetry ---------- */
 let tele = {}, lastSeq = 0;
@@ -557,11 +568,14 @@ function onTele(items) {
   const t = Array.isArray(items) ? items[items.length - 1] : items; if (!t) return;
   tele = t;
   trackCar(t);
-  document.querySelectorAll('.bar .seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === t.mode)));
-  const sect = !t.found ? 'unknown' : (t.section || 'unknown');
-  const pill = $('hSect'); pill.className = 'sect-pill ' + sect; pill.textContent = !t.found ? 'Line lost' : sect === 'corner' ? 'Curve' : sect === 'straight' ? 'Straight' : 'Reading';
+  document.querySelectorAll('#modeSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === t.mode)));
+  const sect = !t.found ? 'lost' : (t.section === 'corner' || t.section === 'straight') ? t.section : 'unknown';
+  const pill = $('hSect'); pill.className = 'chip ' + sect;
+  pill.textContent = !t.found ? 'Line lost' : sect === 'corner' ? 'Curve' : sect === 'straight' ? 'Straight' : 'Reading';
   $('hThr').innerHTML = fmt(t.throttle) + (t.speed_target != null && t.mode === 'local' ? `<small>→ ${fmt(t.speed_target)}</small>` : '');
   $('hSteer').textContent = t.steering == null ? '—' : (t.steering < 0 ? 'L ' : t.steering > 0 ? 'R ' : '') + fmt(Math.abs(t.steering));
+  const s = Math.max(-1, Math.min(1, t.steering || 0)), bar = $('hSteerBar');
+  bar.style.width = (Math.abs(s) * 50) + '%'; bar.style.left = s < 0 ? (50 + s * 50) + '%' : '50%';
   $('hCurv').innerHTML = t.curv == null || Math.abs(t.curv) < 0.05 ? 'Straight' : `${fmt(1 / Math.abs(t.curv), 2)}<small>m ${t.curv > 0 ? 'left' : 'right'}</small>`;
 }
 function connect() {
@@ -572,15 +586,14 @@ function connect() {
 async function pollStatus() {
   try {
     const s = await api('/api/status');
-    const dot = $('srcDot');
-    dot.className = 'dot ' + (s.live ? 'live' : !s.fresh ? 'stale' : 'sim');
+    $('srcDot').className = 'dot ' + (s.live ? 'live' : !s.fresh ? 'stale' : 'sim');
     $('srcText').textContent = s.live ? 'Live car' : !s.fresh ? (s.source === 'car' ? 'Car not sending data' : 'Waiting for data')
       : s.source === 'simulator' ? 'Simulator' : s.source === 'replay' ? 'Recorded replay' : s.source;
     $('camEmpty').hidden = s.fresh;
   } catch (e) { $('srcDot').className = 'dot stale'; $('srcText').textContent = 'Dashboard unreachable'; }
 }
 
-/* ---------- ramp ---------- */
+/* ---------- lap tuner ---------- */
 /* The step buttons are shortcuts for the "Faster each lap by" slider: one value, kept on the car. */
 function syncStep() {
   document.querySelectorAll('#stepSeg button').forEach(x => x.setAttribute('aria-pressed', String(Math.abs(+x.dataset.step - (knobs.tune_step ?? -1)) < 1e-6)));
@@ -603,7 +616,6 @@ function segState(key, a, ramping) {
   if (!ramping && a.state !== 'paused') return a.strategy === 'sections' && a.state === 'done' && res === 'passed' ? 'passed' : 'idle';
   return res === 'passed' ? 'passed' : res === 'failed' ? 'failed' : 'checking';
 }
-const esc = v => String(v ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 function renderLaps(laps) {
   if (!laps || !laps.length) return;
   const cls = r => r === 'passed' ? 'passed' : r === 'retune' ? 'retune' : 'limit';
@@ -673,24 +685,13 @@ async function pollLog() {
   try {
     const items = await api('/api/log?since=' + logSince);
     if (!items.length) return;
-    logItems.push(...items); logSince = items[items.length - 1].id; logItems = logItems.slice(-80);
-    $('log').innerHTML = logItems.slice().reverse().map(e => `<div class="row"><span class="t">${e.time.slice(0, 8)}</span><span class="${e.level === 'info' ? '' : e.level}">${e.text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</span></div>`).join('');
+    logItems.push(...items); logSince = items[items.length - 1].id; logItems = logItems.slice(-120);
+    $('log').innerHTML = logItems.slice().reverse().map(e => `<div class="item"><span class="t">${esc(e.time.slice(0, 8))}</span><span class="${e.level === 'info' ? '' : esc(e.level)}">${esc(e.text)}</span></div>`).join('');
   } catch (e) {}
 }
 
-
-/* ---------- guide + lap timer ---------- */
+/* ---------- lap timer ---------- */
 const secs = v => v == null ? '—' : (+v).toFixed(2) + ' s';
-function guide(a) {
-  const ramping = a && a.strategy === 'sections' && (a.state === 'running' || a.state === 'paused');
-  const finished = a && a.strategy === 'sections' && a.state === 'done';
-  const done = { place: !!tele.found, auto: tele.mode === 'local', start: ramping || finished, save: finished && savedSinceRun };
-  let next = null;
-  for (const li of document.querySelectorAll('#guide li')) {
-    const k = li.dataset.step; li.classList.toggle('done', !!done[k]);
-    const isNext = !done[k] && next === null; if (isNext) next = k; li.classList.toggle('next', isNext);
-  }
-}
 async function pollLaps() {
   let L; try { L = await api('/api/laps'); } catch (e) { return; }
   $('tCur').textContent = L.current == null ? '—' : (+L.current).toFixed(1) + ' s';
@@ -704,24 +705,23 @@ async function pollLaps() {
     : E ? 'estimate, not timed yet' : '';
   $('tBest').textContent = secs(L.best);
   const pen = L.race_penalty_s ? ` + ${fmt(L.race_penalty_s, 0)} s penalties` : '';
-  $('tRaceK').textContent = L.count || !E ? `${L.race_laps}-lap race` : `Estimated ${L.race_laps}-lap race`;
+  $('tRaceK').textContent = L.count || !E ? `${L.race_laps}-lap race` : `Est. ${L.race_laps}-lap race`;
   $('tRace').textContent = L.race_total != null ? secs(L.race_total_with_penalties) : L.race_so_far != null ? secs(L.race_so_far + (L.race_penalty_s || 0)) : E ? '≈ ' + fmt(E.total_s, 1) + ' s' : '—';
-  $('tRaceSub').textContent = L.race_total != null ? `last ${L.race_laps} laps${pen}` : L.count ? `${Math.min(L.count, L.race_laps)} of ${L.race_laps} laps so far${pen}` : E ? 'estimate, no penalties' : '';
+  $('tRaceSub').textContent = L.race_total != null ? `last ${L.race_laps} laps${pen}` : L.count ? `${Math.min(L.count, L.race_laps)} of ${L.race_laps} laps${pen}` : E ? 'estimate, no penalties' : '';
   $('estLine').innerHTML = !E ? '' : L.mean != null
     ? `<b>Timed:</b> ${secs(L.mean)} average lap, ${L.race_laps} laps ≈ ${fmt(L.race_laps * L.mean + (L.race_penalty_s || 0), 1)} s${L.race_penalty_s ? ` including ${fmt(L.race_penalty_s, 0)} s of penalties (${L.race_lost} line losses × 5 s, ${L.race_stops} stops × 10 s)` : ', no penalties so far'}.`
-    : `<b>Estimate for these settings:</b> lap ${secs(E.lap_s)}, ${E.laps} laps ${fmt(E.total_s, 1)} s. From ${esc(E.basis)}. Real lap times replace this once laps are timed.`;
+    : `<b>Estimate for these settings:</b> lap ${secs(E.lap_s)}, ${E.laps} laps ${fmt(E.total_s, 1)} s. From ${esc(E.basis)}.`;
   $('tLost').textContent = L.current == null ? '—' : L.lost_this_lap;
-  guide(lastAt);
 }
 $('tReset').onclick = async () => { try { await api('/api/laps', {}); toast('Lap timer reset'); pollLaps(); } catch (e) { toast(e.message); } };
-setInterval(pollLaps, 500);
 
 /* ---------- start ---------- */
 $('cam').src = '/video';
 $('cam').onerror = () => { $('camEmpty').hidden = false; };
 load().then(() => { pollTuning(); }).catch(e => toast(e.message));
-connect(); pollStatus(); pollLog();
-setInterval(pollStatus, 2000); setInterval(pollTuning, 1000); setInterval(pollLog, 2000);
+connect(); pollStatus(); pollLog(); pollLaps();
+if (location.hash === '#settings') openDrawer(true);   // deep link: /#settings opens the menu
+setInterval(pollLaps, 500); setInterval(pollStatus, 2000); setInterval(pollTuning, 1000); setInterval(pollLog, 2000);
 </script>
 </body>
 </html>
