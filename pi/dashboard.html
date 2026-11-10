@@ -1530,6 +1530,9 @@ function wireLapControls() {
     catch (e) { toast('Stop request failed: ' + e.message); }
   };
   syncLapSpeed();
+  const baseline = Math.min(0.55, +range.max);
+  range.value = number.value = baseline.toFixed(2);
+  $('lapSpeedReadout').textContent = baseline.toFixed(2);
 }
 let reviewReportUrl = null, lastReviewReport = null;
 async function pollReview() {
