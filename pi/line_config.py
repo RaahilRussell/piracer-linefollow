@@ -67,19 +67,20 @@ CRAWL_RAMP_UP = 0.10       # throttle per second while not moving
 CRAWL_MOVE_MOTION = 2.5    # camera motion score that counts as rolling
 CRAWL_FAST_MOTION = 6.0    # above this it eases off
 
-# --- Wrong-line + lost-line behaviour (backtested on recorded runs, tools/backtest.py) ---
-# LEFT_LEAN_SWAP: a stripe leaning like a RIGHT boundary can't be the left line when a
-#   stripe leaning like a LEFT boundary sits to its left. Track run: wrong picks 4 -> 0.
-LEFT_LEAN_SWAP = True
-# Lost line: hold heading, keep rolling LOST_COAST_S, ramp down over LOST_SLOW_S, then stop
-# (was: throttle 0 instantly + wheels re-centred). Throttle cut-outs 17 -> 3 on the track run.
+# --- Telling the two lines apart (linetrack/detector.py; backtest: tools/backtest.py) ---
+# Each boundary keeps its identity from frame to frame: a line lying where LEFT was is LEFT.
+# Geometry only starts a track (two lines one lane apart, or one line by the side it passes).
+TRACK_MEMORY_FRAMES = 8    # a boundary that vanishes keeps its place this many frames (0.4 s)
+LONE_CONFIRM_FRAMES = 1    # 2-3 = a single new line must hold still that many frames before it is trusted
+LANE_WIDTH_RATIO = 0.47    # lane width at the lookahead row before it has been learned (fraction of width)
+MASK_GROW_PX = 3           # strict orange grows this far into nearly-orange pixels (glare holes); 0 = off
+MAX_EDGE_ROUGHNESS_PX = 2.5  # ragged-edged orange (wood grain, skin) is not tape; 0 = off
+
+# --- Lost-line behaviour ---------------------------------------------------------
+# Lost line: hold heading, keep rolling LOST_COAST_S, ramp down over LOST_SLOW_S, then stop.
 LOST_HOLD_HEADING = True
 LOST_COAST_S = 0.5
 LOST_SLOW_S = 0.5
-# Tested and NOT enabled: REACQUIRE_CONFIRM_FRAMES (cost tracking, nothing gained on top of
-# the swap) and SHAPE_FILTER (strict settings broke tracking, loose ones did nothing).
-REACQUIRE_CONFIRM_FRAMES = 0
-SHAPE_FILTER = False
 
 # --- One line only = maybe the wrong line ----------------------------------------
 # With only one orange line identified, the pilot never speeds up; if that lasts

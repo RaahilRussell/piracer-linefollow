@@ -32,31 +32,45 @@ class Config:
     lookahead_ratio: float = 0.62  # row (fraction of height) where steering is measured
     lookahead_from_points: bool = True  # use the measured edge near the lookahead row (not the fitted curve)
     lookahead_band_ratio: float = 0.07  # +/- this fraction of height around the lookahead row
-    # --- Wrong-line protection (backtested before enabling; all off = old behaviour) ---
-    reacquire_confirm_frames: int = 0   # a stripe picked WITHOUT continuity must hold its place this many
-                                        # frames before the tracker locks onto it (0 = lock at once)
-    left_lean_swap: bool = False        # if the tracked stripe leans like a RIGHT boundary and a stripe leaning
-                                        # like a LEFT boundary is further left, switch to that one
-    lean_swap_min_sep_ratio: float = 0.15
-    # --- Tape-shape filter (rotation-invariant): reject blobs that aren't tape-shaped ---
-    shape_filter: bool = False
-    min_rect_fill: float = 0.4          # blob area / its tilted bounding box
-    min_solidity: float = 0.6           # blob area / its convex hull (ragged edges score low)
-    max_aspect: float = 25.0            # long side / short side of the tilted box
+    # --- Mask growth: nearly-orange pixels count when they touch strictly-orange ones ---
+    mask_grow_px: int = 3               # how far (px) the strict mask may grow into nearly-orange pixels; 0 = off
+    weak_h_margin: int = 4              # "nearly orange": hue this much past h_hi / before h_wrap_lo ...
+    weak_s_margin: int = 30             # ... saturation this much below s_lo ...
+    weak_v_margin: int = 30             # ... brightness this much below v_lo
+    # --- Line candidates: orange runs linked from scanline to scanline ---
+    run_merge_gap_px: int = 3           # runs on one row closer than this are one run (speckle holes)
+    chain_gap_ratio: float = 0.04       # a line may vanish for this fraction of the height and still be one line
+    chain_link_px: float = 2.0          # sideways slack per scanline when linking runs
+    max_run_width_ratio: float = 0.45   # rows where the stripe is wider than this give no edge point
+    acquire_min_span_ratio: float = 0.08  # a NEW line must be at least this tall (fraction of height) ...
+                                        # ... and reach into the lower 80% of the ROI (not a horizon fragment)
+    max_edge_roughness_px: float = 2.5  # tape edges are smooth; raggeder candidates (wood grain, skin) are dropped
+    local_fit_resid_px: float = 2.0     # if one curve misses the edge by more than this, fit near the lookahead only
+    local_fit_window_ratio: float = 0.2
+    # --- Telling the two boundaries apart ---
+    horizon_ratio: float = 0.42         # image row of the horizon (lane width shrinks to 0 there)
+    lane_min_ratio: float = 0.25        # two lines are one lane if their gap is within these multiples
+    lane_max_ratio: float = 1.8         # of the expected lane width on that row
+    track_memory_frames: int = 8        # a boundary that vanishes keeps its place this many frames
+    side_memory_frames: int = 40        # a line reappearing where LEFT/RIGHT was last seen keeps that name
+    lone_confirm_frames: int = 1        # a single line with no history must hold this many frames first (1 = at once)
+    lone_center_margin: float = 0.15    # a single line passing this close to the car's centre is ambiguous
+    bracket_margin: float = 0.15        # slack for "the car sits between these two lines"
+    flip_confirm_frames: int = 3        # frames of evidence before a tracked line is renamed LEFT<->RIGHT
     # --- Lost line: hold heading instead of re-centring the wheels ---
     lost_hold_heading: bool = False
-    num_scanlines: int = 32        # rows sampled for edge points (dense: small far fragments count)
+    num_scanlines: int = 48        # rows sampled in the ROI (dense: small far fragments count)
     min_component_area: int = 25   # pixels, at processing resolution
     lean_tolerance: float = 0.15   # |dx/dy| below this counts as "vertical" when classifying a lone stripe
     reject_right_ratio: float = 0.62  # a lone stripe starting right of this is treated as the right boundary
-    max_blob_width_ratio: float = 0.22  # reject components whose mean row width exceeds this (hands etc.)
+    max_blob_width_ratio: float = 0.22  # reject candidates thicker than this across the line (hands etc.)
     max_jump_ratio: float = 0.12   # max allowed edge shift between frames (continuity gate)
-    process_width: int = 240
+    process_width: int = 240       # frames wider than this are downscaled before processing
     # --- Right-line fallback (when the inside/left line leaves the view in turns) ---
     use_right_fallback: bool = True
     lane_width_ratio: float = 0.47     # initial lane width at the lookahead row; learned live when both lines show
     right_fallback_conf_scale: float = 0.9
-    handoff_decay: float = 0.8         # per frame: how fast the left<->right switch offset fades (0 = instant jump)       # frames wider than this are downscaled before processing
+    handoff_decay: float = 0.8         # per frame: how fast the left<->right switch offset fades (0 = instant jump)
 
     # --- Controller ---
     kp: float = 2.2

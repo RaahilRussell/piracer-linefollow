@@ -73,11 +73,10 @@ KNOBS = [
     ("lost_hold_heading", "Safety", "Hold heading when lost", 0, 1, 1, "1 = keep the last steering while blind (backtested: better)."),
     ("coast_s", "Safety", "Coast when lost (s)", 0.0, 2.0, 0.1, "Full auto keeps its speed this long after losing the line."),
     ("slow_s", "Safety", "Then slow to a stop over (s)", 0.0, 2.0, 0.1, "0 + 0 = cut throttle the moment the line is lost."),
-    ("left_lean_swap", "Detection", "Left-of-right check", 0, 1, 1, "1 = a right-leaning stripe can't be the left line if a left-leaning one is further left."),
 ]
 KNOB_IDS = {k[0] for k in KNOBS}
 KNOB_LABELS = {k[0]: k[2] for k in KNOBS}
-INT_KNOBS = {"s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "left_lean_swap", "corner_plan"}
+INT_KNOBS = {"s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "corner_plan"}
 
 
 class Hub:
@@ -137,7 +136,7 @@ class Hub:
             "lost_timeout_s": c.lost_timeout_s,
             "ff_gain": c.ff_gain, "corner_plan": int(bool(c.corner_plan)), "corner_margin": c.corner_margin,
             "single_line_stop_s": getattr(self.pilot, "single_line_stop_s", 0.0),
-            "lost_hold_heading": int(bool(c.lost_hold_heading)), "left_lean_swap": int(bool(c.left_lean_swap)),
+            "lost_hold_heading": int(bool(c.lost_hold_heading)),
             "coast_s": getattr(self.pilot, "coast_s", 0.0), "slow_s": getattr(self.pilot, "slow_s", 0.0),
             "auto_crawl": int(self.pilot is not None and self.pilot.crawl is not None),
             "top_throttle": self.cap.top if self.cap is not None else 1.0,
@@ -175,7 +174,7 @@ class Hub:
             x = c.throttle
         elif kid == "single_line_stop_s":
             self.pilot.single_line_stop_s = x
-        elif kid in ("lost_hold_heading", "left_lean_swap", "corner_plan"):
+        elif kid in ("lost_hold_heading", "corner_plan"):
             setattr(c, kid, bool(x))
         elif kid in ("coast_s", "slow_s"):
             setattr(self.pilot, kid, x)

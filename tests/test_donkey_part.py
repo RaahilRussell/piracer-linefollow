@@ -207,26 +207,25 @@ class TestAutoCrawlAndSingleLine(unittest.TestCase):
 
 
 class TestBacktestedFixes(unittest.TestCase):
-    """The two changes the backtest showed help, on the real frames where they matter."""
+    """Behaviour checked against recorded frames where earlier versions went wrong."""
 
-    def _picks(self, swap):
+    def _picks(self):
         from linetrack.detector import LeftLineDetector
         cfg, _ = load_line_config(line_config)
-        cfg.left_lean_swap = swap
         det = LeftLineDetector(cfg)
         picks = {}
         for f in sorted(glob.glob(os.path.join(ROOT, "tests", "frames", "wrongline", "*.jpg"))):
             d = det.detect(cv2.imread(f))
-            if d.selected is not None:  # the stripe it believes is the left line (even if it then
-                picks[os.path.basename(f)] = d.selected.near_x / (d.width / d.scale)  # steers off the right line)
+            if d.selected is not None:  # the stripe it believes is the left line
+                picks[os.path.basename(f)] = d.selected.near_x / (d.width / d.scale)
         return picks
 
-    def test_left_lean_swap_fixes_wrong_line_lock(self):
-        # run 20261108-185226: from ~1495 the old tracker locked onto the right boundary (x~0.4)
+    def test_left_line_is_not_confused_with_the_right_one(self):
+        # run 20261108-185226: from ~1495 an early tracker locked onto the right boundary (x~0.4)
         # while the real left line sat at the far left (x<0.05). Hand-labelled frames:
+        picks = self._picks()
         for name, truth in {"001500.jpg": 0.021, "001520.jpg": 0.010, "001540.jpg": 0.034}.items():
-            self.assertGreater(abs(self._picks(False).get(name, 9) - truth), 0.07)   # old: wrong
-            self.assertLess(abs(self._picks(True)[name] - truth), 0.07)              # new: right
+            self.assertLess(abs(picks[name] - truth), 0.07, name)
 
     def test_coast_then_slow_then_stop_holding_heading(self):
         from donkey_part import AutoCrawl

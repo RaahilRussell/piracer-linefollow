@@ -50,34 +50,30 @@ LABELS = os.path.join(ROOT, "tools", "labels.json")
 DATASETS = {
     "track_run": (os.path.join(ROOT, "runs", "20261108-185226", "*.jpg"), 0.05,
                   os.path.join(ROOT, "runs", "20261108-185226", "log.csv")),
+    "carpet_run": (os.path.join(ROOT, "runs", "20261109-193803", "*.jpg"), 0.05,
+                   os.path.join(ROOT, "runs", "20261109-193803", "log.csv")),
     "stage_laps": (os.path.join(ROOT, "tests", "frames", "stage", "*.jpg"), 0.2, None),
     "hallway": (os.path.join(ROOT, "tests", "frames", "live2", "*.jpg"), 0.2, None),
 }
 
-# Each variant = Config overrides (+ pilot options). Every new feature is OFF in baseline.
+# Each variant = Config overrides (+ pilot options: pilot_coast_s, pilot_slow_s, ...).
 VARIANTS = {
     "baseline": {},   # = line_config.py as it is now
-    "old": {"left_lean_swap": False, "lost_hold_heading": False, "pilot_coast_s": 0.0, "pilot_slow_s": 0.0},
-    # 1. wrong-line protection
-    "confirm2": {"reacquire_confirm_frames": 2},
-    "confirm3": {"reacquire_confirm_frames": 3},
-    "confirm5": {"reacquire_confirm_frames": 5},
-    "swap": {"left_lean_swap": True},
-    "confirm3+swap": {"reacquire_confirm_frames": 3, "left_lean_swap": True},
-    # 2. lost line: hold heading, coast, slow, stop
-    "coast.5/.5": {"lost_hold_heading": True, "pilot_coast_s": 0.5, "pilot_slow_s": 0.5},
+    # mask: strict threshold only (no growth into nearly-orange pixels)
+    "no_grow": {"mask_grow_px": 0},
+    # candidates: no ragged-edge filter (wood grain / skin are allowed through)
+    "no_rough": {"max_edge_roughness_px": 0.0},
+    # identity: forget a vanished boundary at once / hold it longer
+    "memory0": {"track_memory_frames": 0, "side_memory_frames": 0},
+    "memory20": {"track_memory_frames": 20},
+    # a single line with no history must hold 2 or 3 frames before it is trusted
+    "confirm2": {"lone_confirm_frames": 2},
+    "confirm3": {"lone_confirm_frames": 3},
+    # left line only (no right-line backup)
+    "left_only": {"use_right_fallback": False},
+    # lost line: cut throttle at once and re-centre / coast longer
+    "no_coast": {"lost_hold_heading": False, "pilot_coast_s": 0.0, "pilot_slow_s": 0.0},
     "coast1/1": {"lost_hold_heading": True, "pilot_coast_s": 1.0, "pilot_slow_s": 1.0},
-    "hold_only": {"lost_hold_heading": True},
-    # 3. tape-shape filter
-    "shape.55/.80": {"shape_filter": True, "min_rect_fill": 0.55, "min_solidity": 0.80},
-    "shape.40/.60": {"shape_filter": True, "min_rect_fill": 0.40, "min_solidity": 0.60},
-    "shape.30/.50": {"shape_filter": True, "min_rect_fill": 0.30, "min_solidity": 0.50},
-    "shape.15/.35": {"shape_filter": True, "min_rect_fill": 0.15, "min_solidity": 0.35},
-    "shape_aspect_only": {"shape_filter": True, "min_rect_fill": 0.0, "min_solidity": 0.0, "max_aspect": 12.0},
-    # combinations of what helped
-    "swap+coast": {"left_lean_swap": True, "lost_hold_heading": True, "pilot_coast_s": 0.5, "pilot_slow_s": 0.5},
-    "swap+coast+conf2": {"left_lean_swap": True, "lost_hold_heading": True, "pilot_coast_s": 0.5, "pilot_slow_s": 0.5,
-                         "reacquire_confirm_frames": 2},
 }
 
 
@@ -86,12 +82,17 @@ def load_frames(name):
     files = sorted(glob.glob(pattern))
     times = None
     if log and os.path.exists(log):
-        with open(log) as f:
-            rows = {int(r["n"]): r for r in csv.DictReader(f)}
+        rows = {}
+        with open(log, errors="replace") as f:
+            for r in csv.DictReader(line.replace("\0", "") for line in f):
+                try:                       # a power cut mid-write leaves junk rows: skip them
+                    rows[int(r["n"])] = float(r["t"])
+                except (TypeError, ValueError):
+                    continue
         times = []
         for p in files:
             n = int(os.path.splitext(os.path.basename(p))[0])
-            times.append(float(rows[n]["t"]) if n in rows else None)
+            times.append(rows.get(n))
         t0 = next(t for t in times if t is not None)
         times = [(t - t0) if t is not None else None for t in times]
     if times is None or any(t is None for t in times):
