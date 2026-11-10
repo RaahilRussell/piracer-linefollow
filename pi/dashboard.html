@@ -1396,7 +1396,14 @@ function organizeWorkbench() {
     <p class="note">Place the car at your chosen start mark with a clear circle ahead. Start only when the camera says TRACKING. Press finish when it returns to that mark; the dashboard cannot reliably identify a lap boundary from camera frames alone.</p>
     <div class="row"><button class="btn primary" id="lapStart">Start full-circle lap</button><button class="btn danger" id="lapStop">Finish lap · stop & review</button><span id="lapRunStatus" class="note">Stopped</span></div>`;
   const lapIntro = document.createElement('div'); lapIntro.className = 'card lap-page-intro';
-  lapIntro.innerHTML = `<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Starting throttle is 0.70 for straights, transition and curves. Adjust the two sections independently, then raise them after clean passes. STOP remains available in the header.</p></div><a class="btn" href="#drive">Open drive controls</a></div>
+  lapIntro.innerHTML = `<div class="card-h"><div><h1>Lap tuner</h1><p class="note">Set the throttle for your next lap. Changes apply immediately in Full Auto.</p></div><a class="btn" href="#drive">Open drive controls</a></div>
+    <form id="sectionSpeeds" class="lap-step-control"><h2>Section throttle</h2>
+      <p id="sectionLimits" class="note">Reading car settings…</p>
+      <div class="row"><label for="quickStraight">Straight · current <output id="nowStraight">—</output></label>
+      <input class="field" type="number" id="quickStraight" required min="0.45" step="0.01"></div>
+      <div class="row"><label for="quickCurve">Curve · current <output id="nowCurve">—</output></label>
+      <input class="field" type="number" id="quickCurve" required min="0.45" step="0.01"></div>
+      <button class="btn primary" id="applySpeeds" disabled>Apply both speeds</button></form>
     <div class="lap-step-control"><label for="tuneSpeedStep">Throttle increase after each clean step <output id="tuneSpeedStepReadout">0.08</output></label>
       <input id="tuneSpeedStep" type="range" min="0.01" max="0.12" step="0.01" value="0.08" aria-label="Throttle increase after each clean step">
       <p class="note">Used by both workflows. Each passed step raises straight, transition and curve throttle by this amount. Make bigger jumps for speed, or smaller jumps near the limit.</p></div>
@@ -1507,6 +1514,18 @@ function organizeWorkbench() {
 }
 let lapSpeedTimer = null, lapSpeedWrites = Promise.resolve();
 function syncLapSpeed() {
+  const form = $('sectionSpeeds');
+  if (form && knobDef('max_auto') && knobDef('top_throttle')) {
+    const limit = Math.min(knobVal('max_auto'), knobVal('top_throttle'));
+    for (const [name, key] of [['Straight','speed_straight'], ['Curve','speed_corner']]) {
+      const field = $('quick' + name), current = knobVal(key);
+      $('now' + name).textContent = current.toFixed(2);
+      field.max = limit.toFixed(2);
+      if (!form.dataset.editing && document.activeElement !== field) field.value = current.toFixed(2);
+    }
+    $('sectionLimits').textContent = 'Straight: 0.45–' + limit.toFixed(2) + '. Curve: 0.45 up to the straight setting.';
+    $('applySpeeds').disabled = !!form.dataset.sending || limit < .45;
+  }
   const range = $('lapSpeed'), number = $('lapSpeedNumber');
   if (!range || !number || document.activeElement === range || document.activeElement === number) return;
   const cap = Math.min(knobVal('max_auto') ?? 0.8, knobVal('top_throttle') ?? 0.8, 0.8);
@@ -1537,6 +1556,25 @@ function saveLapSpeed(value) {
   return lapSpeedWrites;
 }
 function wireLapControls() {
+  const form = $('sectionSpeeds');
+  form.oninput = () => { form.dataset.editing = '1'; $('quickCurve').setCustomValidity(''); };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const straight = $('quickStraight').valueAsNumber, curve = $('quickCurve').valueAsNumber;
+    if (curve > straight) {
+      $('quickCurve').setCustomValidity('Curve throttle must be at or below straight throttle.');
+      form.reportValidity(); return;
+    }
+    form.dataset.sending = '1'; $('applySpeeds').disabled = true;
+    try {
+      const transition = Math.min(straight, Math.max(curve, knobVal('speed_transition')));
+      const result = await api('/api/knobs', {speed_straight:straight, speed_corner:curve, speed_transition:transition});
+      for (const [key, value] of Object.entries(result.applied)) if (knobDef(key)) knobDef(key).value = value;
+      delete form.dataset.editing;
+      syncBigKnobs(); toast('Section throttle applied');
+    } catch (e) { toast(e.message); }
+    finally { delete form.dataset.sending; syncLapSpeed(); }
+  };
   const range = $('lapSpeed'), number = $('lapSpeedNumber');
   const stepRange = $('tuneSpeedStep'), stepReadout = $('tuneSpeedStepReadout');
   stepRange.addEventListener('input', () => { stepReadout.textContent = (+stepRange.value).toFixed(2); });
@@ -1558,7 +1596,7 @@ function wireLapControls() {
     const button = $('lapStart'); button.disabled = true;
     try {
       clearTimeout(lapSpeedTimer);
-      await saveLapSpeed(speed);
+      if (knobVal('speed_straight') === knobVal('speed_corner')) await saveLapSpeed(speed);
       const target = await api('/api/knobs', { target_x_ratio: 0.46 });
       if (knobDef('target_x_ratio')) knobDef('target_x_ratio').value = target.applied.target_x_ratio;
       syncBigKnobs();
@@ -1578,7 +1616,7 @@ function wireLapControls() {
       const review = await api('/api/lap-review', { samples, speed, step: +stepRange.value }); lapTune.report = review;
       let reportText = `Lap ${lapTune.run}: ${review.result.toUpperCase()} · ${review.samples} samples · tracking ${review.tracking_pct == null ? '—' : review.tracking_pct + '%'} · p90 line error ${review.error_p90 == null ? '—' : review.error_p90} · steering near limit ${review.steering_limit_pct == null ? '—' : review.steering_limit_pct + '%'} (not a failure by itself). ${review.message}`;
       if (review.result === 'passed') lapTune.safeSpeed = speed;
-      if (review.result !== 'inconclusive' && review.result !== 'failed' && review.next_speed > speed) {
+      if (knobVal('speed_straight') === knobVal('speed_corner') && review.result !== 'inconclusive' && review.result !== 'failed' && review.next_speed > speed) {
         await saveLapSpeed(review.next_speed);
       } else if (review.result === 'failed' && lapTune.safeSpeed != null) {
         reportText += ` Last clean speed: ${lapTune.safeSpeed.toFixed(2)}.`;
