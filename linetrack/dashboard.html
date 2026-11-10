@@ -1,0 +1,113 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Line Tracker</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#111;--fg:#eee;--mut:#999;--card:#1c1c1c;--ok:#2ecc40;--bad:#ff4136;--cy:#00e5ff}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px -apple-system,system-ui,sans-serif}
+main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;padding:12px}
+@media(max-width:1100px){main{grid-template-columns:1fr}}
+img{width:100%;border-radius:6px;background:#000;display:block}
+.card{background:var(--card);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+.row{display:grid;grid-template-columns:118px 1fr 52px;gap:6px;align-items:center;margin:3px 0}
+.row label{color:var(--mut);font-size:12px} .row input[type=range]{width:100%}
+.row output{text-align:right;font-variant-numeric:tabular-nums}
+#estop{width:100%;padding:16px;font-size:20px;font-weight:700;background:var(--bad);color:#fff;border:0;border-radius:8px;cursor:pointer}
+.modes{display:flex;gap:6px;margin-top:8px} .modes button{flex:1;padding:8px;border:1px solid #444;background:#222;color:var(--fg);border-radius:6px;cursor:pointer}
+.modes button.on{background:#0b4;border-color:#0b4}
+#tele{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-variant-numeric:tabular-nums}
+#tele span{color:var(--mut)} .big{font-size:22px;font-weight:700}
+#status.TRACKING{color:var(--ok)} #status.LOST,#status.STALE{color:var(--bad)}
+#msg{color:#ffb700;min-height:1.2em;margin-top:6px}
+button.small{padding:6px 10px;background:#333;color:var(--fg);border:1px solid #555;border-radius:6px;cursor:pointer}
+</style></head><body>
+<main>
+<section>
+  <img id="video" src="/stream.mjpg" alt="annotated camera feed">
+  <div class="card" style="margin-top:10px">
+    <b>Legend:</b> <span style="color:#2ecc40">green box/points/curve</span> = tracked LEFT stripe and its inside (right) edge ·
+    <span style="color:#ffbe00">amber</span> = right boundary's inside edge, used (minus lane width) only when the left line is lost ·
+    <span style="color:#ff4136">red box</span> = ignored stripe ·
+    <span style="color:var(--cy)">cyan vertical</span> = target x · cyan horizontal = lookahead row ·
+    <span style="color:#f0f">magenta circle</span> = measured edge at lookahead. Keyboard: <b>SPACE = E-STOP</b>.
+  </div>
+</section>
+<aside>
+  <div class="card">
+    <button id="estop">E-STOP (space)</button>
+    <div class="modes">
+      <button data-mode="preview">Preview</button>
+      <button data-mode="steer_only">Steer only</button>
+      <button data-mode="drive">Drive</button>
+    </div>
+    <div id="msg"></div>
+  </div>
+  <div class="card">
+    <h3>Telemetry</h3>
+    <div class="big" id="status">—</div>
+    <div id="tele"></div>
+  </div>
+  <div class="card"><h3>Steering target &amp; control</h3><div id="ctl"></div></div>
+  <div class="card"><h3>Orange HSV</h3><div id="hsv"></div></div>
+  <div class="card"><h3>Geometry / safety</h3><div id="geo"></div>
+    <div style="margin-top:8px"><button class="small" id="save">Save to config.json</button></div></div>
+</aside>
+</main>
+<script>
+const S = {
+ ctl:[["target_x_ratio",0,1,.01],["kp",0,6,.05],["kd",0,2,.01],["max_steering",0,1,.05],
+      ["steering_rate_limit",.2,10,.1],["steering_smoothing",0,.9,.05],["throttle",0,.3,.01],["invert_steering"]],
+ hsv:[["h_lo",0,179,1],["h_hi",0,179,1],["h_wrap_lo",150,180,1],["s_lo",0,255,1],["s_hi",0,255,1],["v_lo",0,255,1],["v_hi",0,255,1]],
+ geo:[["roi_top_ratio",0,.9,.01],["lookahead_ratio",.3,1,.01],["num_scanlines",4,64,1],["min_component_area",1,400,1],
+      ["max_jump_ratio",.02,.4,.01],["lean_tolerance",0,1,.01],["reject_right_ratio",.3,1,.01],["min_confidence",0,1,.01],
+      ["max_frame_age_s",.05,2,.05],["lost_timeout_s",.1,3,.05],
+      ["use_right_fallback"],["lane_width_ratio",.15,1.2,.01],["handoff_decay",0,.98,.01]]
+};
+let built=false, msgT;
+const $=id=>document.getElementById(id);
+const post=(u,b)=>fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})}).then(r=>r.json());
+function say(t){ $("msg").textContent=t; clearTimeout(msgT); msgT=setTimeout(()=>$("msg").textContent="",6000); }
+function build(cfg){
+  for(const [box,list] of Object.entries(S)) for(const [k,lo,hi,st] of list){
+    const r=document.createElement("div"); r.className="row";
+    if(lo===undefined){ r.innerHTML=`<label>${k}</label><input type=checkbox id=${k}><output></output>`;
+      $(box).appendChild(r); $(k).checked=cfg[k]; $(k).onchange=e=>post("/api/config",{[k]:e.target.checked}); continue; }
+    r.innerHTML=`<label>${k}</label><input type=range id=${k} min=${lo} max=${hi} step=${st}><output id=${k}_o></output>`;
+    $(box).appendChild(r); $(k).value=cfg[k]; $(k+"_o").textContent=cfg[k];
+    $(k).oninput=e=>{ $(k+"_o").textContent=e.target.value; post("/api/config",{[k]:+e.target.value}); };
+  }
+  built=true;
+}
+async function setMode(m){
+  let confirm="";
+  if(m==="steer_only"){ if(!window.confirm("Steering-only test: throttle is forced to 0.\nAre the drive wheels LIFTED off the ground?")) return; confirm="WHEELS LIFTED"; }
+  if(m==="drive"){ confirm=prompt('DRIVE sends throttle. Donkeycar does NOT stop the car if this Mac loses connection.\nOnly continue if an on-car watchdog/failsafe is installed and tested, the car is on the track, and someone can grab it.\n\nType: ONBOARD FAILSAFE VERIFIED')||""; }
+  const r=await post("/api/mode",{mode:m,confirm}); say(r.msg);
+}
+document.querySelectorAll(".modes button").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+$("estop").onclick=()=>post("/api/estop").then(()=>say("E-STOP sent"));
+document.addEventListener("keydown",e=>{ if(e.code==="Space"){ e.preventDefault(); post("/api/estop"); say("E-STOP sent"); }});
+$("save").onclick=()=>post("/api/save").then(r=>say(r.msg));
+async function poll(){
+  try{
+    const s=await (await fetch("/api/state")).json();
+    if(!built && s.config) build(s.config);
+    $("status").textContent=s.status||"—"; $("status").className="big "+(s.status||"");
+    document.querySelectorAll(".modes button").forEach(b=>b.classList.toggle("on",b.dataset.mode===s.mode));
+    const f=(v,d=2)=>v==null?"—":(+v).toFixed(d);
+    $("tele").innerHTML=[
+      ["mode",s.mode],["note",s.mode_note],["confidence",f(s.confidence)],["reason",s.reason],
+      ["following",s.source==="right"?"RIGHT line − lane width":s.source==="left"?"LEFT line":"—"],
+      ["left / right conf",f(s.left_conf)+" / "+f(s.right_conf)],["lane width",f(s.lane_width,3)],
+      ["edge x / target",f(s.x_ratio,3)+" / "+f(s.target)],["error",f(s.error,3)],
+      ["steering",f(s.steering)+(s.steering>0.02?" R":s.steering<-0.02?" L":"")],["throttle",f(s.throttle)],
+      ["fps (proc)",f(s.fps,1)],["camera fps",f(s.camera_fps,1)],["latency ms",f(s.proc_ms,1)],["frame age ms",f(s.frame_age_ms,0)],
+      ["video",s.video_connected?"connected":"DOWN "+(s.video_error||"")],["control ws",s.ws_connected?`connected (${s.ws_sent} sent)`:"idle"],
+      ["drive allowed",s.drive_enabled?"yes (--enable-drive)":"no"],
+      ["stripes",(s.stripes||[]).map(x=>`${x.role}@${x.near_x}`).join(" ")]
+    ].map(([a,b])=>`<span>${a}</span><b>${b??"—"}</b>`).join("");
+  }catch(e){ $("status").textContent="dashboard disconnected"; }
+  setTimeout(poll,150);
+}
+poll();
+</script></body></html>

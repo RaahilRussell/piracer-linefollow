@@ -1,0 +1,353 @@
+{
+  "_about": "Parameters of a Waveshare PiRacer Pro and its track. status: verified = manufacturer spec; measured = from this vehicle (its config or our own tests); assumed = temporary simulation placeholder for an UNKNOWN value -- it has a range, is swept rather than trusted, and must be replaced by measuring it (sim/CALIBRATION.md). Edit values here; never edit the code to change a number.",
+  "wheelbase_m": {
+    "value": 0.1741,
+    "unit": "m",
+    "status": "verified",
+    "source": "Waveshare PiRacer Pro wiki: wheelbase ~174.1 mm"
+  },
+  "body_length_m": {
+    "value": 0.255,
+    "unit": "m",
+    "status": "verified",
+    "source": "Waveshare wiki: 25.5 x 14 x 21.5 cm"
+  },
+  "body_width_m": {
+    "value": 0.14,
+    "unit": "m",
+    "status": "verified",
+    "source": "Waveshare wiki: 25.5 x 14 x 21.5 cm"
+  },
+  "body_height_m": {
+    "value": 0.215,
+    "unit": "m",
+    "status": "verified",
+    "source": "Waveshare wiki: 25.5 x 14 x 21.5 cm"
+  },
+  "drivetrain": {
+    "value": "4WD, front/rear differentials, Ackermann steering",
+    "status": "verified",
+    "source": "Waveshare product page"
+  },
+  "motor": {
+    "value": "RC380 brushed, 15000 rpm unloaded (motor shaft, NOT wheel speed; gearing and wheel size unpublished)",
+    "status": "verified",
+    "source": "Waveshare product page"
+  },
+  "servo": {
+    "value": "6 kg.cm",
+    "status": "verified",
+    "source": "Waveshare product page (speed not published)"
+  },
+  "battery": {
+    "value": "8.4 V nominal, 2S2P 18650",
+    "status": "verified",
+    "source": "Waveshare product page"
+  },
+  "camera_sensor": {
+    "value": "OV5647, 160 deg wide-angle (diagonal vs horizontal not stated)",
+    "status": "verified",
+    "source": "Waveshare product page"
+  },
+  "camera_fov_deg": {
+    "value": 160.0,
+    "unit": "deg",
+    "status": "verified",
+    "source": "Waveshare: 160 deg FOV. ASSUMED to be the diagonal FOV of an equidistant fisheye -- confirm with CALIBRATION.md step 7"
+  },
+  "steer_pwm_left": {
+    "value": 450,
+    "unit": "PCA9685 ticks",
+    "status": "measured",
+    "source": "~/mycar/myconfig.py STEERING_LEFT_PWM (read 2026-11-08; re-confirm when the Pi is back)"
+  },
+  "steer_pwm_right": {
+    "value": 300,
+    "unit": "PCA9685 ticks",
+    "status": "measured",
+    "source": "~/mycar/myconfig.py STEERING_RIGHT_PWM (read 2026-11-08)"
+  },
+  "thr_pwm_forward": {
+    "value": 407,
+    "unit": "PCA9685 ticks",
+    "status": "measured",
+    "source": "~/mycar/myconfig.py THROTTLE_FORWARD_PWM = 407 ('was 500') (read 2026-11-08)"
+  },
+  "thr_pwm_stopped": {
+    "value": 370,
+    "unit": "PCA9685 ticks",
+    "status": "measured",
+    "source": "~/mycar/myconfig.py THROTTLE_STOPPED_PWM (read 2026-11-08)"
+  },
+  "thr_pwm_reverse": {
+    "value": 300,
+    "unit": "PCA9685 ticks",
+    "status": "measured",
+    "source": "~/mycar/myconfig.py THROTTLE_REVERSE_PWM (read 2026-11-08)"
+  },
+  "pwm_channels": {
+    "value": "PCA9685 bus 1 addr 0x40: ch0 steering, ch1 throttle",
+    "status": "measured",
+    "source": "~/mycar/myconfig.py PWM_STEERING_THROTTLE (read 2026-11-08)"
+  },
+  "image_w_px": {
+    "value": 240,
+    "unit": "px",
+    "status": "measured",
+    "source": "~/mycar config IMAGE_W"
+  },
+  "image_h_px": {
+    "value": 192,
+    "unit": "px",
+    "status": "measured",
+    "source": "~/mycar config IMAGE_H"
+  },
+  "camera_fps": {
+    "value": 20,
+    "unit": "Hz",
+    "status": "measured",
+    "source": "CAMERA_FRAMERATE = 20; ~20 distinct frames/s seen on the live stream"
+  },
+  "control_hz": {
+    "value": 20,
+    "unit": "Hz",
+    "status": "measured",
+    "source": "DRIVE_LOOP_HZ = 20"
+  },
+  "processing_s": {
+    "value": 0.033,
+    "unit": "s",
+    "range": [
+      0.017,
+      0.051
+    ],
+    "status": "measured",
+    "source": "Detector+overlay time on the Pi: 17 ms offline, 33-51 ms while driving"
+  },
+  "thr_cmd_moves": {
+    "value": 0.5,
+    "unit": "cmd",
+    "range": [
+      0.45,
+      0.55
+    ],
+    "status": "measured",
+    "source": "Stick test 2026-11-08: wheels turn from stick ~0.45-0.55 (PWM ~387-390); 0.30 (PWM 381) did not move the car. Rough: refine with CALIBRATION.md step 3"
+  },
+  "steer_angle_table": {
+    "value": [
+      [
+        300,
+        25.0
+      ],
+      [
+        375,
+        0.0
+      ],
+      [
+        450,
+        -25.0
+      ]
+    ],
+    "unit": "[PWM, front-wheel angle deg (+ = right)]",
+    "range": [
+      15.0,
+      35.0
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN. Placeholder linear map, +/-25 deg at the PWM limits, straight at 375 (Donkeycar's midpoint). Measure the turning radius at several PWM values: CALIBRATION.md step 2"
+  },
+  "servo_rate_dps": {
+    "value": 300.0,
+    "unit": "deg/s",
+    "range": [
+      150.0,
+      600.0
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN (servo speed not published). Measure: CALIBRATION.md step 6"
+  },
+  "servo_tau_s": {
+    "value": 0.03,
+    "unit": "s",
+    "range": [
+      0.0,
+      0.08
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN. First-order lag on top of the slew limit. CALIBRATION.md step 6"
+  },
+  "actuator_delay_s": {
+    "value": 0.02,
+    "unit": "s",
+    "range": [
+      0.0,
+      0.06
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN: PCA9685 update + ESC/servo response. CALIBRATION.md step 8"
+  },
+  "speed_table": {
+    "value": [
+      [
+        370,
+        0.0
+      ],
+      [
+        387,
+        0.0
+      ],
+      [
+        390,
+        0.35
+      ],
+      [
+        407,
+        1.8
+      ]
+    ],
+    "unit": "[PWM, steady speed m/s]",
+    "status": "assumed",
+    "source": "UNKNOWN. Placeholder: deadband to PWM 387 (matches the stick test), linear to 1.8 m/s at 407. Measure timed runs per PWM: CALIBRATION.md step 3"
+  },
+  "start_pwm": {
+    "value": 389,
+    "unit": "PCA9685 ticks",
+    "range": [
+      385,
+      395
+    ],
+    "status": "assumed",
+    "source": "PWM needed to start from rest (static friction). Stick test suggests ~387-390. CALIBRATION.md step 3"
+  },
+  "accel_max": {
+    "value": 3.0,
+    "unit": "m/s^2",
+    "range": [
+      1.0,
+      6.0
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN. CALIBRATION.md step 4"
+  },
+  "brake_coast": {
+    "value": 1.5,
+    "unit": "m/s^2",
+    "range": [
+      0.5,
+      3.0
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN: deceleration with throttle at neutral. CALIBRATION.md step 4"
+  },
+  "brake_active": {
+    "value": 4.0,
+    "unit": "m/s^2",
+    "range": [
+      2.0,
+      8.0
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN: deceleration with reverse PWM while moving (ESC brake). CALIBRATION.md step 4"
+  },
+  "mu_lat": {
+    "value": 0.5,
+    "unit": "g",
+    "range": [
+      0.3,
+      0.9
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN tyre-to-mat grip (max lateral accel / 9.81). CALIBRATION.md step 5"
+  },
+  "cam_height_m": {
+    "value": 0.17,
+    "unit": "m",
+    "range": [
+      0.12,
+      0.22
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN (must be under the 0.215 m body height). Measure: CALIBRATION.md step 7"
+  },
+  "cam_pitch_deg": {
+    "value": 8.0,
+    "unit": "deg down",
+    "range": [
+      4.0,
+      14.0
+    ],
+    "status": "assumed",
+    "source": "DERIVED, not measured: real frames show the horizon at ~0.42 of image height; under the 160-deg-diagonal equidistant fisheye model that means ~8 deg down. Measure directly: CALIBRATION.md step 7"
+  },
+  "cam_fwd_m": {
+    "value": 0.15,
+    "unit": "m ahead of rear axle",
+    "range": [
+      0.08,
+      0.22
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN. CALIBRATION.md step 7"
+  },
+  "meas_noise": {
+    "value": 0.006,
+    "unit": "fraction of width",
+    "range": [
+      0.003,
+      0.02
+    ],
+    "status": "assumed",
+    "source": "Line-position jitter on parked frames ~0.005 (rough); varies with lighting"
+  },
+  "meas_dropout": {
+    "value": 0.02,
+    "unit": "probability",
+    "range": [
+      0.0,
+      0.1
+    ],
+    "status": "assumed",
+    "source": "Frames with no usable line on a good track (rough, from runs)"
+  },
+  "track_straight_m": {
+    "value": 1.6,
+    "unit": "m",
+    "range": [
+      0.8,
+      3.0
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN: measure the stage track (CALIBRATION.md step 1)"
+  },
+  "track_radius_m": {
+    "value": 0.5,
+    "unit": "m (inside/left line)",
+    "range": [
+      0.3,
+      1.0
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN: measure (step 1)"
+  },
+  "lane_width_m": {
+    "value": 0.53,
+    "unit": "m (left tape inside edge to right tape inside edge)",
+    "range": [
+      0.4,
+      0.8
+    ],
+    "status": "assumed",
+    "source": "DERIVED, not measured: with the camera model above, 0.53 m reproduces the 0.47-of-width gap between the lines seen on real frames at the lookahead row. Measure with a tape measure: CALIBRATION.md step 1"
+  },
+  "tape_width_m": {
+    "value": 0.05,
+    "unit": "m",
+    "range": [
+      0.019,
+      0.06
+    ],
+    "status": "assumed",
+    "source": "UNKNOWN: measure the orange tape (step 1)"
+  }
+}

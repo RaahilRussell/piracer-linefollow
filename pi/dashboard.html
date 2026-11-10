@@ -1,0 +1,1402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PiRacer Line Follower</title>
+<style>
+/* Workflow: Drive -> Diagnose (what's wrong now) -> Tune (simulator start -> adjust with preview -> auto-tune)
+   -> Simulator (starting PID per speed, what-if, stability map) -> Runs.
+   Data source is always explicit: "Live · car" only when the server is drive_line.py on the Pi AND
+   telemetry is fresh. Simulator and replay are labelled as such everywhere.
+   Design (Apple HIG via apple-design-skill): tape orange = the line, teal = target, red/amber/green =
+   status (always with text); text contrast >= 4.5:1 light and dark; system font, 13px body; controls
+   >= 28px (44px on touch); destructive actions in a menu away from STOP. */
+:root {
+  --surface: #f5f4f8; --card: #ffffff; --fill: #efedf3; --ink: #1c1b22; --secondary: #5c5868; --separator: #e2dfe8;
+  --tape: #b93d0b; --tape-fill: #f0672a; --target: #0b6f84; --mat: #e4dcf5;
+  --ok: #1a7340; --warn: #8a5600; --bad: #c0261d; --sim: #6a4fc4;
+  --stop-bg: #c0261d; --stop-fg: #ffffff;
+  --c-p: #6a4fc4; --c-d: #2f62d4; --grid: #ebe8f0;
+  --bar: rgba(245, 244, 248, .8);
+  --shadow: 0 1px 2px rgba(28, 27, 34, .06), 0 0 0 1px var(--separator);
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+  --r: 12px; --ctl: 28px;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #141318; --card: #1e1d24; --fill: #2a2931; --ink: #f2f0f7; --secondary: #a9a4b6; --separator: #33313c;
+    --tape: #ff8a4c; --tape-fill: #ff7a35; --target: #45c9db; --mat: #3a3350;
+    --ok: #4cc38a; --warn: #f2b33d; --bad: #ff6b60; --sim: #b3a1f2;
+    --stop-bg: #ff6b60; --stop-fg: #141318;
+    --c-p: #b3a1f2; --c-d: #7fa6ff; --grid: #2b2a33;
+    --bar: rgba(20, 19, 24, .8);
+    --shadow: 0 0 0 1px var(--separator);
+  }
+}
+@media (prefers-contrast: more) { :root { --secondary: var(--ink); --separator: var(--secondary); } }
+@media (pointer: coarse) { :root { --ctl: 44px; } }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--surface); color: var(--ink); font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+a { color: inherit; }
+[hidden] { display: none !important; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.note { font-size: 12px; color: var(--secondary); margin: 0; }
+p { margin: 0; }
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--target) 70%, transparent); outline-offset: 2px; border-radius: 6px; }
+
+/* ---------- toolbar ---------- */
+.toolbar { position: sticky; top: 0; z-index: 10; background: var(--bar); border-bottom: 1px solid var(--separator);
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
+@media (prefers-reduced-transparency: reduce) { .toolbar { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+.toolbar-in { max-width: 1440px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); }
+.title { display: grid; line-height: 1.25; margin-right: 2px; }
+.title b { font-size: 13px; font-weight: 600; }
+.flex { flex: 1; }
+.src { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; }
+.src .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.src.live { color: var(--ok); } .src.sim { color: var(--sim); } .src.replay { color: var(--warn); } .src.down { color: var(--bad); }
+.banner { max-width: 1440px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); }
+.banner > div { border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 500; }
+.banner .sim { background: color-mix(in srgb, var(--sim) 14%, transparent); color: var(--ink); }
+.banner .replay { background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.banner .down { background: color-mix(in srgb, var(--bad) 13%, transparent); }
+
+.seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--fill); border-radius: 8px; flex-wrap: wrap; }
+.seg > button, .seg > a { min-height: calc(var(--ctl) - 4px); min-width: 56px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; text-decoration: none; font-weight: 500; white-space: nowrap; }
+.seg > button:hover, .seg > a:hover { background: color-mix(in srgb, var(--card) 60%, transparent); }
+.seg > .on { background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.06); font-weight: 600; }
+.seg.modes > .on[data-mode="local_angle"], .seg.modes > .on[data-mode="local"] { box-shadow: inset 0 0 0 1.5px var(--tape), 0 1px 2px rgba(0,0,0,.12); }
+.count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 700; display: inline-grid; place-items: center; }
+.count.bad { background: var(--bad); color: var(--stop-fg); } .count.warn { background: var(--warn); color: var(--card); }
+
+.btn { min-height: var(--ctl); padding: 0 12px; border: 0; border-radius: 7px; background: var(--fill); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.btn:hover { background: color-mix(in srgb, var(--fill) 70%, var(--secondary) 30%); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.primary { background: var(--ink); color: var(--card); }
+.btn.arm { background: var(--warn); color: var(--card); }
+.btn.small { min-height: 24px; padding: 0 8px; font-size: 12px; }
+.stop { min-height: var(--ctl); min-width: 96px; padding: 0 18px; border: 0; border-radius: 8px; background: var(--stop-bg); color: var(--stop-fg);
+  font-weight: 700; letter-spacing: .04em; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.stop kbd { font: 600 11px var(--sans); opacity: .8; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; }
+
+.menu { position: relative; }
+.menu > summary { list-style: none; } .menu > summary::-webkit-details-marker { display: none; }
+.menu-pop { position: absolute; right: 0; top: calc(100% + 6px); min-width: 260px; padding: 6px; background: var(--card); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.18), 0 0 0 1px var(--separator); display: grid; gap: 2px; z-index: 20; }
+.menu-pop button { text-align: left; border: 0; background: transparent; border-radius: 6px; padding: 8px 10px; min-height: var(--ctl); cursor: pointer; display: grid; gap: 1px; }
+.menu-pop button:hover { background: var(--fill); }
+.menu-pop button.arm { background: var(--warn); color: var(--card); } .menu-pop button.arm .note { color: inherit; }
+.menu-pop .danger { color: var(--bad); font-weight: 600; }
+.menu-pop hr { border: 0; border-top: 1px solid var(--separator); margin: 4px 6px; }
+
+/* ---------- layout ---------- */
+main { max-width: 1440px; margin: 0 auto; padding: 16px max(16px, env(safe-area-inset-right)) 96px max(16px, env(safe-area-inset-left)); }
+.view { display: grid; gap: 16px; }
+.hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: start; }
+.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.cols.wide-left { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+@media (max-width: 960px) { .hero, .cols, .cols.wide-left, .runs, .frameview { grid-template-columns: minmax(0, 1fr) !important; } }
+.card { background: var(--card); border-radius: var(--r); box-shadow: var(--shadow); padding: 16px; display: grid; gap: 12px; min-width: 0; align-content: start; }
+.card-h { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+h2 { font-size: 15px; font-weight: 600; margin: 0; }
+h3 { font-size: 12px; font-weight: 600; margin: 0; color: var(--secondary); }
+.step { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); color: var(--card); font-size: 12px; font-weight: 700; margin-right: 8px; flex: none; }
+.step-h { display: flex; align-items: center; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.field { width: 76px; min-height: var(--ctl); padding: 0 6px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 99px; font-weight: 600; font-size: 12px; line-height: 20px; white-space: nowrap; }
+.badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.badge.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.badge.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.badge.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 13%, transparent); }
+.badge.info, .badge.plain { color: var(--secondary); background: var(--fill); }
+.badge.sim { color: var(--sim); background: color-mix(in srgb, var(--sim) 13%, transparent); }
+.badge.plain::before { display: none; }
+
+/* camera + lane gauge */
+.video { width: 100%; aspect-ratio: 240 / 192; background: #000; border-radius: 8px; object-fit: contain; display: block; }
+.status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lane canvas { width: 100%; height: 76px; display: block; }
+.legend, .lane-cap { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--secondary); }
+.key { display: inline-block; width: 12px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.topissue { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: var(--surface); cursor: pointer; border: 0; text-align: left; width: 100%; }
+.topissue:hover { background: var(--fill); }
+.mission { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr); gap: 16px; align-items: stretch; }
+.mission-main { display: grid; gap: 8px; align-content: start; }
+.mission-main h1 { font-size: clamp(22px, 3vw, 34px); letter-spacing: -.03em; }
+.mission-main p { max-width: 62ch; }
+.mission-next { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 10px; background: var(--surface); }
+.mission-next .big { font-size: 24px; line-height: 1; }
+.mission-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mission-actions .btn { min-height: 38px; }
+.mission-actions .primary { box-shadow: 0 2px 0 color-mix(in srgb, var(--ink) 22%, transparent); }
+.mission-readout { display: grid; gap: 8px; align-content: start; padding: 12px 14px; border-left: 1px solid var(--separator); }
+.mission-readout .k { color: var(--secondary); font-size: 12px; }
+.mission-readout .v { font: 600 18px/1.25 var(--mono); font-variant-numeric: tabular-nums; }
+.mission-readout .note { margin-top: -4px; }
+@media (max-width: 720px) { .mission { grid-template-columns: 1fr; } .mission-readout { border-left: 0; border-top: 1px solid var(--separator); padding: 12px 0 0; } }
+
+.readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--separator); border-radius: 10px; overflow: hidden; }
+.readouts > div { background: var(--card); padding: 10px 12px; min-width: 0; }
+.readouts .k { font-size: 12px; color: var(--secondary); }
+.readouts .v { font: 600 22px/1.2 var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.01em; }
+.readouts .v small { font-size: 13px; font-weight: 500; color: var(--secondary); }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0 20px; margin: 0; }
+.facts > div { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--separator); min-width: 0; }
+.facts dt { color: var(--secondary); }
+.facts dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+canvas.chart { width: 100%; height: 168px; display: block; }
+.workbench { display:grid; grid-template-columns:minmax(230px, .85fr) minmax(340px, 1.4fr); gap:18px; align-items:start; }
+.workbench-live { position:sticky; top:85px; display:grid; gap:14px; }
+.workbench-live .video { max-height:26vh; }
+.workbench-live .pad { height:150px; min-height:150px; max-width:100%; }
+.workbench-live .readouts .v { font-size:18px; }
+.workbench-live .readouts .k { font-size:11px; }
+.workbench-controls .section-card .bigknob .help, .workbench-controls .section-gains { display:none; }
+.workbench-controls .section-card .bigknob { grid-template-columns:minmax(0,1fr) 62px; }
+.workbench-controls .section-card .field { width:62px; }
+.workbench-controls .section-card .bigknob label { font-size:12px; }
+.workbench-controls .section-card { padding:12px; }
+.workbench-live .card { margin:0; }
+.workbench-controls .section-grid { grid-template-columns:1fr 1fr; }
+.workbench-controls .section-card { display:grid; gap:12px; align-content:start; }
+.workbench-controls .section-gains { font-size:14px; }
+.workbench-controls .bigknob { margin:6px 0; }
+.workbench-controls .section-help { min-height:36px; }
+.workbench-controls .btn { min-height:40px; }
+.workbench-controls .section-tune { border:0; padding:0; margin:0; }
+.workbench .verdict .big { display:none; }
+.workbench .verdict h1 { font-size:18px; }
+.workbench .issue { padding:10px 0; }
+.workspace-extra { margin-top:18px; }
+.workspace-extra > summary { padding:14px; font-size:15px; cursor:pointer; }
+.mission-main { grid-template-columns:minmax(0,1fr) auto; gap:8px; }
+.mission-main > .card-h { grid-column:1 / -1; margin-bottom:0; }
+.mission-main h1 { font-size:22px; }
+.mission-main .mission-next { grid-column:1; padding:8px 10px; }
+.mission-main .mission-actions { grid-column:2; grid-row:2; }
+.mission-main .mission-actions .btn { min-height:34px; }
+.mission-main .mission-next .big { font-size:18px; }
+.workbench-live .lane canvas { height:38px; }
+@media(max-width:620px) { .mission-main { grid-template-columns:1fr; } .mission-main .mission-actions { grid-column:1; grid-row:3; } }
+@media(max-width:620px) { .workbench { grid-template-columns:1fr; } .workbench-live { position:static; } .workbench-live .video { max-height:26vh; } }
+@media(max-width:560px) { .workbench-controls .section-grid { grid-template-columns:1fr; } }
+
+/* diagnosis */
+.verdict { display: flex; align-items: center; gap: 12px; }
+.verdict .big { font-size: 28px; line-height: 1; }
+.issues { display: grid; gap: 10px; }
+.issue { display: flex; gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--surface); align-items: flex-start; }
+.issue .lvl { flex: none; margin-top: 1px; }
+.issue .txt { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.issue h2 { font-size: 14px; }
+.issue .why { color: var(--secondary); }
+.issue .act { flex: none; align-self: center; }
+.issue.bad { box-shadow: inset 3px 0 0 var(--bad); } .issue.warn { box-shadow: inset 3px 0 0 var(--warn); } .issue.ok { box-shadow: inset 3px 0 0 var(--ok); }
+@media (max-width: 720px) { .issue { flex-wrap: wrap; } .issue .txt { flex-basis: calc(100% - 90px); } .issue .act { margin-left: auto; } }
+.metrics { display: flex; flex-wrap: wrap; gap: 6px; }
+.metric { padding: 6px 10px; border-radius: 8px; background: var(--surface); display: grid; }
+.metric b { font: 600 15px var(--mono); font-variant-numeric: tabular-nums; }
+.metric span { font-size: 11px; color: var(--secondary); }
+.metric.ok b { color: var(--ok); } .metric.warn b { color: var(--warn); } .metric.bad b { color: var(--bad); }
+.guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.guide div { padding: 8px 10px; border-radius: 8px; background: var(--surface); font-size: 12px; }
+.guide b { display: block; font-size: 13px; }
+
+/* tune */
+.bigknob { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: 4px 10px; align-items: center; }
+.bigknob label { font-weight: 600; font-size: 14px; }
+.bigknob input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--tape); min-height: 24px; }
+.bigknob .help { grid-column: 1 / -1; font-size: 12px; color: var(--secondary); }
+.bigknob .field { width: 84px; font-size: 15px; }
+.knobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px 24px; }
+.kgroup { display: grid; gap: 10px; align-content: start; }
+.knob { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 2px 8px; align-items: center; }
+.knob label { font-weight: 500; }
+.knob label.changed::after, .bigknob label.changed::after { content: "  edited"; color: var(--tape); font-size: 11px; font-weight: 600; }
+.knob input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--tape); min-height: 20px; }
+.knob input[type=number] { width: 76px; min-height: var(--ctl); padding: 0 6px; border: 1px solid var(--separator); border-radius: 6px; background: var(--surface); font-family: var(--mono); text-align: right; }
+.knob .help { grid-column: 1 / -1; font-size: 12px; color: var(--secondary); }
+.pwm { font: 12px var(--mono); color: var(--secondary); }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.suggest { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--sim) 9%, var(--surface)); }
+.suggest .gains { font: 600 18px var(--mono); }
+details.more > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+.strats { display: grid; gap: 6px; }
+.strats label { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: start; border-radius: 8px; padding: 8px 10px; cursor: pointer; background: var(--surface); }
+.strats label:has(input:checked) { box-shadow: inset 0 0 0 1.5px var(--ink); }
+.strats input { margin-top: 3px; accent-color: var(--ink); } .strats .note { grid-column: 2; }
+.section-tune { display: grid; gap: 10px; margin: 14px 0 18px; padding: 14px; border-radius: 12px; background: color-mix(in srgb, var(--tape) 7%, var(--surface)); }
+.section-tune h3 { margin: 0; }
+.section-tune .steps { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--secondary); font-size: 12px; }
+.section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.section-card { display: grid; gap: 8px; padding: 12px; border-radius: 10px; background: var(--card); box-shadow: inset 0 0 0 1px var(--separator); }
+.section-card.active { box-shadow: inset 0 0 0 2px var(--tape); }
+.section-card h4 { margin: 0; font-size: 15px; }
+.section-card .section-gains { font: 600 17px var(--mono); font-variant-numeric: tabular-nums; }
+.section-card .section-help { min-height: 34px; color: var(--secondary); font-size: 12px; }
+.section-card .row { justify-content: flex-start; }
+@media (max-width: 720px) { .section-grid { grid-template-columns: 1fr; } }
+
+/* simulator */
+.speedpick { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+.speedpick input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--ink); }
+.mapwrap { position: relative; }
+.mapwrap canvas { width: 100%; aspect-ratio: 20 / 13; display: block; cursor: crosshair; }
+canvas.trackview { width: 100%; aspect-ratio: 16 / 10; display: block; }
+.caveat { padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--sim) 10%, transparent); font-size: 12px; }
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--separator); border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* tables, log, joystick */
+table.kv { border-collapse: collapse; width: 100%; font-size: 12px; }
+table.kv td, table.kv th { padding: 6px 8px; border-bottom: 1px solid var(--separator); text-align: left; font-weight: 400; }
+table.kv th { color: var(--secondary); font-weight: 500; }
+table.kv td:last-child { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+table.grid td, table.grid th { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.grid td:first-child, table.grid th:first-child { text-align: left; font-family: var(--sans); }
+table.grid tr.cur td { background: color-mix(in srgb, var(--tape-fill) 10%, transparent); }
+.log { max-height: 320px; overflow: auto; border-radius: 8px; background: var(--surface); }
+.logrow { display: grid; grid-template-columns: 70px 64px minmax(0, 1fr); gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--separator); align-items: baseline; }
+.logrow:last-child { border-bottom: 0; }
+.logrow .tm { font: 12px var(--mono); color: var(--secondary); font-variant-numeric: tabular-nums; }
+.pad { position: relative; width: min(100%, 220px); aspect-ratio: 1; border-radius: 50%; touch-action: none; user-select: none; margin: 4px auto; cursor: grab;
+  background: radial-gradient(circle, var(--fill) 0 32%, transparent 33%), var(--surface); box-shadow: inset 0 0 0 1px var(--separator); }
+.pad::before, .pad::after { content: ""; position: absolute; background: var(--separator); }
+.pad::before { left: 50%; top: 10%; bottom: 10%; width: 1px; } .pad::after { top: 50%; left: 10%; right: 10%; height: 1px; }
+.pad .knobdot { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: var(--ink); z-index: 1; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.pad.held { box-shadow: inset 0 0 0 2px var(--tape); } .pad.held .knobdot { background: var(--tape-fill); }
+.pad .lbl { position: absolute; font-size: 11px; color: var(--secondary); z-index: 1; }
+
+.runs { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.runlist { display: grid; gap: 2px; max-height: 70vh; overflow: auto; }
+.runitem { text-align: left; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; cursor: pointer; display: grid; gap: 2px; }
+.runitem:hover { background: var(--fill); }
+.runitem.on { background: var(--ink); color: var(--card); }
+.runitem.on .s { color: inherit; opacity: .85; }
+.runitem.on .badge { color: inherit; background: color-mix(in srgb, var(--card) 22%, transparent); }
+.runitem .t { font: 600 13px var(--mono); } .runitem .s { font-size: 12px; color: var(--secondary); }
+.events { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev { border: 0; background: var(--surface); border-radius: 99px; padding: 4px 10px; min-height: var(--ctl); font-size: 12px; cursor: pointer; box-shadow: inset 0 0 0 1px var(--separator); }
+.ev.lost, .ev.single, .ev.stalled { box-shadow: inset 0 0 0 1.5px var(--bad); }
+.ev.fallback, .ev.saturated { box-shadow: inset 0 0 0 1.5px var(--warn); }
+.frameview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.frameview img { width: 100%; border-radius: 8px; background: #000; aspect-ratio: 240 / 192; object-fit: contain; }
+input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
+
+.toast { position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); color: var(--card);
+  padding: 10px 16px; border-radius: 10px; z-index: 40; max-width: calc(100% - 32px); box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+
+@media (pointer: coarse) { .seg > button, .seg > a { min-height: 44px; } }
+@media (max-width: 720px) {
+  /* no blur: backdrop-filter would make the toolbar the containing block of the fixed STOP button */
+  .toolbar { position: static; background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .seg.modes, .seg.views { order: 5; width: 100%; } .seg.modes > button, .seg.views > a { flex: 1; min-width: 0; padding: 0 6px; }
+  .stop { position: fixed; z-index: 30; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom));
+    min-height: 56px; padding: 0 28px; font-size: 16px; border-radius: 14px; box-shadow: 0 8px 22px rgba(0,0,0,.35); }
+  .stop kbd { display: none; }
+  .readouts .v { font-size: 19px; } .readouts .v small { display: block; font-size: 12px; }
+  .toast { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 70px); }
+}
+</style>
+</head>
+<body>
+<header class="toolbar">
+  <div class="toolbar-in">
+    <div class="title"><b>Line Follower</b><span class="src down" id="srcBadge" title="Where this data comes from"><span class="dot"></span><span id="srcText">Connecting…</span></span></div>
+    <nav class="seg views" aria-label="Section">
+      <a href="#drive" data-view="drive">Drive</a>
+      <a href="#diagnose" data-view="diagnose">Diagnose <span class="count" id="diagCount" hidden></span></a>
+      <a href="#tune" data-view="tune">Tune</a>
+      <a href="#simulator" data-view="simulator">Simulator</a>
+      <a href="#runs" data-view="runs">Runs</a>
+    </nav>
+    <span class="flex"></span>
+    <div class="seg modes" id="modeSeg" role="group" aria-label="Drive mode">
+      <button data-mode="user" title="You steer and drive">Manual</button>
+      <button data-mode="local_angle" title="Pilot steers, you control throttle (gamepad A once)">Pilot Steers</button>
+      <button data-mode="local" title="Pilot steers and drives (gamepad A twice)">Full Auto</button>
+    </div>
+    <button class="stop" id="btnStop" title="Throttle 0 and back to Manual. The program keeps running. (Space)">STOP <kbd>Space</kbd></button>
+    <details class="menu" id="powerMenu">
+      <summary class="btn" aria-label="Power options">Power ▾</summary>
+      <div class="menu-pop">
+        <button id="btnQuit"><span class="danger">Quit Program</span><span class="note">Stops the car and exits drive_line.py. Gamepad X does the same.</span></button>
+        <hr>
+        <button id="btnPower"><span class="danger">Shut Down Pi</span><span class="note">Stops driving and shuts down the computer. Then use the car's physical power switch.</span></button>
+      </div>
+    </details>
+  </div>
+  <div class="banner" id="srcBanner" hidden><div></div></div>
+</header>
+
+<main>
+<!-- ============================ DRIVE ============================ -->
+<section class="view" id="view-drive">
+  <div class="card mission">
+    <div class="mission-main">
+      <div class="card-h"><div><h1>Mission control</h1><p class="note">The dashboard watches the car, explains the first problem, and helps you make one safe change at a time.</p></div><span class="badge plain" id="missionSource">Waiting</span></div>
+      <div class="mission-next" id="missionNext"><span class="big" id="missionIcon">…</span><div><b id="missionTitle">Checking the system</b><p class="note" id="missionEvidence">Connect the car, simulator, or a recording.</p></div></div>
+      <div class="mission-actions"><button class="btn primary" id="missionCheck">Run evaluation</button><button class="btn" id="missionFix" hidden>Apply recommended fix</button><button class="btn" id="missionSafe">Prepare Safe mode</button><a class="btn" href="#tune">Tune step-by-step</a><span class="note" id="missionResult"></span></div>
+    </div>
+    <div class="mission-readout"><div><div class="k">What is allowed now</div><div class="v" id="missionAllowed">No motion command</div></div><div><div class="k">Recommended starting point</div><div class="v">Safe · 0.62</div><div class="note">Applies gains and speed limits only. It does not start driving.</div></div></div>
+  </div>
+  <div class="hero">
+    <div class="card">
+      <div class="card-h"><h2>Camera</h2><div class="status-row" id="status"><span class="badge plain">Waiting for data…</span></div></div>
+      <img class="video" id="video" alt="Camera with the tracked line drawn on it">
+      <div class="lane">
+        <canvas id="lane" role="img" aria-label="Lane gauge: waiting for data"></canvas>
+        <div class="lane-cap"><span><i class="key" style="background:var(--tape-fill)"></i>tracked edge</span><span><i class="key" style="background:var(--target)"></i>target</span><span><i class="key" style="background:var(--ink)"></i>steering sent</span></div>
+      </div>
+      <button class="topissue" id="topIssue" onclick="location.hash='#diagnose'"><span class="badge plain">Diagnosis</span><span class="note">Waiting for data…</span></button>
+    </div>
+    <div class="card">
+      <div class="readouts">
+        <div><div class="k">Error</div><div class="v" id="tErr">–</div></div>
+        <div><div class="k">Steering</div><div class="v" id="tSteer">–</div></div>
+        <div><div class="k">Throttle · PWM</div><div class="v" id="tThr">–</div></div>
+      </div>
+      <h3>Steering (PD), last 10 s</h3>
+      <canvas class="chart" id="chSteer" role="img" aria-label="Error, P term, D term and steering over the last 10 seconds"></canvas>
+      <div class="legend"><span><i class="key" style="background:var(--tape-fill)"></i>error</span><span><i class="key" style="background:var(--c-p)"></i>P term</span><span><i class="key" style="background:var(--c-d)"></i>D term</span><span><i class="key" style="background:var(--ink)"></i>steering sent</span></div>
+      <h3>Speed, last 10 s</h3>
+      <canvas class="chart" id="chSpeed" role="img" aria-label="Throttle sent, your stick and camera motion over the last 10 seconds"></canvas>
+      <div class="legend"><span><i class="key" style="background:var(--ink)"></i>throttle sent</span><span><i class="key" style="background:var(--c-p)"></i>your stick</span><span><i class="key" style="background:var(--secondary)"></i>camera motion ÷10</span></div>
+      <dl class="facts">
+        <div><dt>Line x / target</dt><dd id="tX">–</dd></div>
+        <div><dt>Lines seen</dt><dd id="tLines">–</dd></div>
+        <div><dt>Confidence</dt><dd id="tConf">–</dd></div>
+        <div><dt>Motion</dt><dd id="tMot">–</dd></div>
+        <div><dt>Loop · detect</dt><dd id="tHz">–</dd></div>
+        <div><dt>Speed limit now</dt><dd id="tLim">–</dd></div>
+        <div><dt>Section / blend</dt><dd id="tSection">–</dd></div>
+        <div><dt>Curvature</dt><dd id="tCurv">–</dd></div>
+        <div><dt>Gains used</dt><dd id="tGains">–</dd></div>
+        <div><dt>Speed target</dt><dd id="tSpeedTarget">–</dd></div>
+        <div><dt>Error avg, 10 s</dt><dd id="tErrAvg">–</dd></div>
+        <div><dt>Error worst, 10 s</dt><dd id="tErrMax">–</dd></div>
+        <div><dt>Tracked, 10 s</dt><dd id="tTrk">–</dd></div>
+      </dl>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="card">
+      <div class="card-h"><h2>Drive from Here</h2><span class="note">dead-man: let go and the gamepad takes over</span></div>
+      <div class="pad" id="pad" role="application" aria-label="Web joystick: drag to steer and drive, or hold W A S D">
+        <span class="lbl" style="top:8px;left:50%;transform:translateX(-50%)">forward</span>
+        <span class="lbl" style="bottom:8px;left:50%;transform:translateX(-50%)">reverse</span>
+        <span class="lbl" style="left:10px;top:50%;transform:translateY(-50%)">left</span>
+        <span class="lbl" style="right:10px;top:50%;transform:translateY(-50%)">right</span>
+        <div class="knobdot" id="padDot"></div>
+      </div>
+      <div class="knob"><label for="padScale">Web throttle at full push</label><input type="number" id="padScaleN" min="0" max="1" step="0.05" value="1" aria-label="Web throttle at full push"><input type="range" id="padScale" min="0" max="1" step="0.05" value="1"><span class="help">Top speed still caps it. Keyboard: hold W/S to drive, A/D to steer, Space = STOP.</span></div>
+      <p class="note">In <b>Manual</b> this steers and drives. In <b>Pilot Steers</b> only its throttle is used. Releasing, closing the tab or losing Wi-Fi hands control back to the gamepad within 0.4 s.</p>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Log</h2><span class="row"><span class="seg" role="group" aria-label="Log filter"><button id="logAll" class="on">All</button><button id="logProb">Problems</button></span><a class="btn" href="/api/log.txt" download>Download</a></span></div>
+      <p class="note" id="logNote">Line lost and found, backup line, stalls, camera freezes, mode changes, stops and every setting change. On the Pi it's also saved in ~/linefollow/logs/.</p>
+      <div class="log" id="log" aria-live="polite"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ DIAGNOSE ============================ -->
+<section class="view" id="view-diagnose" hidden>
+  <div class="card">
+    <div class="verdict"><span class="big" id="dgIcon">…</span><div><h1 id="dgTitle">Checking…</h1><p class="note" id="dgSub">Looks at the last 10 s of driving, the camera and the control loop, updated every second.</p></div></div>
+    <div class="issues" id="dgIssues"></div>
+  </div>
+  <div class="cols">
+    <div class="card">
+      <div class="card-h"><h2>Steering health</h2><span class="note">last 10 s of pilot driving</span></div>
+      <div class="metrics" id="dgMetrics"><span class="note">Drive in Pilot Steers or Full Auto for about 10 s.</span></div>
+    </div>
+    <div class="card">
+      <h2>How to read the car</h2>
+      <div class="guide">
+        <div><b>Weaving, fast swings</b>KP too high for this speed. Lower KP 10–20%.</div>
+        <div><b>Big errors, steering not at its limit</b>KP too low. Raise KP 20%.</div>
+        <div><b>Steering chatters frame to frame</b>KD too high: it amplifies camera noise.</div>
+        <div><b>Steering pinned at its limit</b>Too fast for the corners. Slow down.</div>
+        <div><b>Line lost, confidence low</b>Detection: loosen the orange filter.</div>
+        <div><b>Line lost, confidence high</b>Running wide: too fast, or KP too low.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ TUNE ============================ -->
+<section class="view" id="view-tune" hidden>
+  <div class="card">
+    <div class="card-h"><div class="step-h"><span class="step">1</span><h2>Start from the simulator's gains for your speed</h2></div>
+      <span class="row"><button class="btn primary" id="btnSave">Save Tuning</button><button class="btn" id="btnRevert">Revert to line_config</button></span></div>
+    <p class="note" id="saveNote">Changes apply on the next frame. Save keeps them for the next start (tuning.json).</p>
+    <div class="suggest" id="tuneSuggest"><span class="note">Loading the simulator's speed profiles…</span></div>
+    <div style="overflow-x:auto"><table class="kv grid" id="tuneProfiles"></table></div>
+  </div>
+  <div class="cols wide-left">
+    <div class="card">
+      <div class="step-h"><span class="step">2</span><h2>Adjust, with a simulated preview</h2></div>
+      <div class="bigknob" style="margin:12px 0 20px"><label for="tuneSpeed" id="tuneSpeedLabel">Preview at speed</label><input class="field" type="number" id="tuneSpeedNumber" min="0.45" max="1" step="0.01" value="0.62" aria-label="Preview speed value"><input type="range" id="tuneSpeed" min="0.45" max="1" step="0.01" value="0.62" aria-labelledby="tuneSpeedLabel" aria-describedby="tuneSpeedHelp"><span class="help" id="tuneSpeedHelp">Simulator preview only. Use Lap speeds below to change the car's speed.</span><span class="help" id="tuneSpeedNote"></span></div>
+      <div class="bigknob"><label for="bk_kp" id="lbl_kp">KP (proportional)</label><input class="field" type="number" id="bkn_kp" min="0" max="10" step="0.1" aria-label="KP value"><input type="range" id="bk_kp" min="0" max="10" step="0.1"><span class="help">How hard it steers per unit of error. Too high: weaves. Too low: runs wide.</span></div>
+      <div class="bigknob"><label for="bk_kd" id="lbl_kd">KD (derivative)</label><input class="field" type="number" id="bkn_kd" min="0" max="2" step="0.05" aria-label="KD value"><input type="range" id="bk_kd" min="0" max="2" step="0.05"><span class="help">Damps the weave by reacting to how fast the error changes. Too high: chatters.</span></div>
+      <div class="bigknob"><label for="bk_target_x_ratio" id="lbl_target_x_ratio">Target position</label><input class="field" type="number" id="bkn_target_x_ratio" min="0.05" max="0.95" step="0.01" aria-label="Target value"><input type="range" id="bk_target_x_ratio" min="0.05" max="0.95" step="0.01"><span class="help">Where the left line's inside edge should sit (fraction of image width).</span></div>
+      <div class="bigknob"><label for="bk_lookahead_ratio" id="lbl_lookahead_ratio">Lookahead row</label><input class="field" type="number" id="bkn_lookahead_ratio" min="0.45" max="0.95" step="0.01" aria-label="Lookahead value"><input type="range" id="bk_lookahead_ratio" min="0.45" max="0.95" step="0.01"><span class="help">Image row where the error is measured. Lower = further ahead (anticipates corners, less stable).</span></div>
+      <details class="more"><summary>All settings</summary><div class="knobs" id="knobs" style="margin-top:10px"></div></details>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>What these gains do</h2><span class="badge sim plain">Simulator</span></div>
+      <div id="pvBody"><span class="note">Waiting for settings…</span></div>
+      <canvas class="chart" id="chStep" role="img" aria-label="Simulated response to a 6 cm nudge"></canvas>
+      <div class="legend"><span><i class="key" style="background:var(--tape-fill)"></i>distance from the ride line after a 6 cm nudge (cm)</span><span><i class="key" style="background:var(--ink)"></i>steering</span></div>
+      <h3>On the car right now</h3>
+      <div id="pvLive" class="note">Drive in Pilot Steers or Full Auto to compare with the real car.</div>
+    </div>
+  </div>
+  <div class="card" id="atSection">
+    <div class="card-h"><div class="step-h"><span class="step">3</span><h2>Auto-tune on the car</h2></div><span id="atState" class="badge ok">idle</span></div>
+    <p class="note">Drives in <b>Full Auto</b> and judges each ~10 s with the health check. STOP, or leaving Full Auto, aborts and restores your settings. Nothing goes above Max: Full auto.</p>
+    <div class="section-tune">
+      <h3>Lap speeds</h3>
+      <p class="note">Fast when straight and settled; slower in bends or during a large correction. These are throttle settings, not measured m/s. The overall and Full Auto limits still apply.</p>
+      <div class="section-grid" style="margin:16px 0">
+        <div class="bigknob"><label for="bk_speed_straight" id="lbl_speed_straight">Straight speed</label><input class="field" type="number" id="bkn_speed_straight" min="0" max="0.8" step="0.01" aria-label="Straight speed value"><input type="range" id="bk_speed_straight" min="0" max="0.8" step="0.01"><span class="help">Zero disables the speed plan. Raise this gradually after both sections pass.</span></div>
+        <div class="bigknob"><label for="bk_speed_corner" id="lbl_speed_corner">Corner speed</label><input class="field" type="number" id="bkn_speed_corner" min="0" max="0.8" step="0.01" aria-label="Corner speed value"><input type="range" id="bk_speed_corner" min="0" max="0.8" step="0.01"><span class="help">A lower, sustained setting through the bend. Keep high enough for the motor to roll.</span></div>
+        <div class="bigknob"><label for="bk_speed_transition" id="lbl_speed_transition">Entry / exit speed</label><input class="field" type="number" id="bkn_speed_transition" min="0" max="0.8" step="0.01" aria-label="Transition speed value"><input type="range" id="bk_speed_transition" min="0" max="0.8" step="0.01"><span class="help">The middle of the handoff. Kept between corner and straight speed.</span></div>
+        <div class="bigknob"><label for="bk_speed_ramp_down" id="lbl_speed_ramp_down">Slowdown rate</label><input class="field" type="number" id="bkn_speed_ramp_down" min="0.05" max="2" step="0.05" aria-label="Slowdown rate value"><input type="range" id="bk_speed_ramp_down" min="0.05" max="2" step="0.05"><span class="help">Higher slows sooner and more firmly; lower makes a longer transition.</span></div>
+        <div class="bigknob"><label for="bk_speed_ramp_up" id="lbl_speed_ramp_up">Acceleration rate</label><input class="field" type="number" id="bkn_speed_ramp_up" min="0.05" max="1" step="0.05" aria-label="Acceleration rate value"><input type="range" id="bk_speed_ramp_up" min="0.05" max="1" step="0.05"><span class="help">Lower eases back onto the straight more gradually.</span></div>
+      </div>
+      <h3>Section-by-section recovery tune</h3>
+      <p class="note">Use one short Full Auto run. The tuner changes only section gains, stops when the detected section ends, and never starts the car itself.</p>
+      <div class="steps"><span>1 · Place car in Manual</span><span>2 · Select Full Auto and start trial</span><span>3 · Trial stops driving at the boundary</span><span>4 · Gamepad takes over to reposition</span></div>
+      <div class="section-grid">
+        <div class="section-card" id="sectionStraightCard">
+          <div class="card-h"><h4>Straight recovery</h4><span class="badge plain" id="sectionStraightState">not tuned</span></div>
+          <div class="section-gains" id="sectionStraightGains">KP – · KD –</div>
+          <div class="section-help">Place the car offset on a straight. Tune how quickly it returns without weaving.</div>
+          <div class="row"><button class="btn" id="sectionStraightReset">Reset sample</button><button class="btn primary" id="sectionStraightStart">Tune straight</button></div>
+        </div>
+        <div class="section-card" id="sectionCornerCard">
+          <div class="card-h"><h4>Corner recovery</h4><span class="badge plain" id="sectionCornerState">not tuned</span></div>
+          <div class="section-gains" id="sectionCornerGains">KP – · KD –</div>
+          <div class="section-help">Place the car at the chosen curve position. Tune the curve response without changing straight gains.</div>
+          <div class="row"><button class="btn" id="sectionCornerReset">Reset sample</button><button class="btn primary" id="sectionCornerStart">Tune corner</button></div>
+        </div>
+      </div>
+      <div class="row"><span class="note" id="sectionTuneNote">Trial completion stops driving. Gamepad sticks take over Auto.</span><button class="btn" id="sectionFinish">End trial &amp; stop driving</button><button class="btn" id="sectionBothStart">Tune both automatically</button><button class="btn" id="sectionSave" disabled>Save section gains</button></div>
+    </div>
+    <div class="strats" id="atStrats" role="radiogroup" aria-label="Auto-tune strategy">
+      <label><input type="radio" name="strat" value="scheduled" checked><b>Schedule-guided ladder <span class="badge ok plain">Recommended</span></b><span class="note">Each speed starts from the simulator's KP/KD, then it's verified and corrected on the car. Climbs speed, then raises only the straights. Passes can be saved as car-verified profiles.</span></label>
+      <label><input type="radio" name="strat" value="ladder"><b>Speed ladder</b><span class="note">From your current KP/KD: fix gains until healthy, step speed up, then raise only the straights.</span></label>
+      <label><input type="radio" name="strat" value="gains"><b>Gains only</b><span class="note">Holds the test speed. Starts from the simulator's KP/KD for that speed and fixes weave, jitter and lag. Doesn't raise KP on its own: the car can't measure whether more KP really helps (it cuts corners).</span></label>
+      <label><input type="radio" name="strat" value="max_speed"><b>Max speed</b><span class="note">Keeps your KP/KD and only climbs speed until it isn't healthy.</span></label>
+      <label><input type="radio" name="strat" value="zn"><b>Ziegler–Nichols <span class="badge warn plain">Cross-check</span></b><span class="note">KD 0, raises KP until a steady weave (deliberately!), then KP = 0.8·Ku, KD = KP·Tu/8 and verifies. Needs about 0.8 throttle to weave; aborts if it loses the line. Have STOP ready.</span></label>
+    </div>
+    <div class="row"><label for="atCeil">Never faster than</label><input class="field" type="number" id="atCeil" min="0.5" max="1" step="0.01" value="0.70"><span class="note" id="atCeilPwm"></span></div>
+    <div class="row" id="atSpeedRow"><label for="atSpeed">Test speed</label><input class="field" type="number" id="atSpeed" min="0.5" max="1" step="0.01" value="" placeholder="auto"><span class="note" id="atSpeedNote"></span></div>
+    <div class="row"><button class="btn primary" id="atStart">Start Auto-Tune</button><button class="btn" id="atStop">Stop</button><button class="btn" id="atKeep" disabled>Keep Result</button><button class="btn" id="atSave" disabled>Save as Car-Verified Profiles</button></div>
+    <p class="note" id="atMsg"></p>
+    <table class="kv" id="atTable"></table>
+  </div>
+</section>
+
+<!-- ============================ SIMULATOR ============================ -->
+<section class="view" id="view-simulator" hidden>
+    <div class="caveat" id="simCaveat">The simulator models the PiRacer from sim/profile.json. Values marked "assumed" need car measurements. Recompute saved profiles after control changes, including these tuning and speed-ramp fixes. Use the results as starting points and confirm on the car.</div>
+  <div class="card">
+    <div class="card-h"><h2>Starting PID for every speed</h2><span class="row"><span class="note" id="profMeta"></span><button class="btn" id="profRecompute" title="Re-run the full gain schedule (about a minute; needs the simulator)">Recompute All</button></span></div>
+    <p class="note">None of these are measured on the car yet: all rows use the same model with 19 unmeasured values. For each speed the simulator screens every KP/KD for stability margins, drives the best in simulated laps, then re-tests the winner on 10 variations of the car with the unmeasured values varied. <b>⚠ fragile</b> = went off track in some variations (hover for the count): fine on the assumed car, risky until the car is measured. <b>✓ car</b> = verified on the real car by auto-tune.</p>
+    <div style="overflow-x:auto"><table class="kv grid" id="profTable"></table></div>
+  </div>
+  <div class="cols">
+    <div class="card">
+      <h2>Try any speed and gains</h2>
+      <div class="speedpick"><label for="simCmd"><b>Throttle</b> <span class="num" id="simCmdV">0.62</span></label><span class="note num" id="simSpeedInfo"></span>
+        <input type="range" id="simCmd" min="0.45" max="1" step="0.01" value="0.62"></div>
+      <div class="row"><label for="simKp">KP</label><input class="field" type="number" id="simKp" min="0" max="12" step="0.1" value="6"><label for="simKd">KD</label><input class="field" type="number" id="simKd" min="0" max="2" step="0.05" value="1.1">
+        <button class="btn" id="simUseSched">Use schedule</button><button class="btn" id="simUseMine">Use my current</button></div>
+      <div class="row"><button class="btn primary" id="simRun">Simulate</button><button class="btn" id="simBest">Find Best Gains for This Speed</button><button class="btn" id="simApply">Apply to Car</button><span class="note" id="simBusy"></span></div>
+      <div id="simVerdict"></div>
+      <div class="metrics" id="simMetrics"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Stability map</h2><span class="note" id="mapNote">click a cell to try it</span></div>
+      <div class="mapwrap"><canvas id="simMap" role="img" aria-label="KP by KD map: unstable, stable, meets every margin"></canvas></div>
+      <div class="legend"><span><i class="key" style="background:var(--bad);opacity:.55"></i>unstable</span><span><i class="key" style="background:var(--warn);opacity:.55"></i>stable, thin margins</span><span><i class="key" style="background:var(--ok);opacity:.55"></i>meets every margin</span><span><i class="key" style="background:var(--ink)"></i>selected</span></div>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="card">
+      <h2>Simulated lap (top view)</h2>
+      <canvas class="trackview" id="simTrack" role="img" aria-label="Top view of the simulated track and the car's path"></canvas>
+      <div class="legend"><span><i class="key" style="background:var(--tape-fill)"></i>tape</span><span><i class="key" style="background:var(--ink)"></i>car path</span></div>
+    </div>
+    <div class="card">
+      <h2>Response to a 6 cm nudge</h2>
+      <canvas class="chart" id="simStep" role="img" aria-label="Simulated step response"></canvas>
+      <h2>Error around the lap</h2>
+      <canvas class="chart" id="simLapErr" role="img" aria-label="Simulated lateral error over the lap"></canvas>
+      <div class="legend"><span><i class="key" style="background:var(--tape-fill)"></i>distance from the ride line (cm)</span><span><i class="key" style="background:var(--ink)"></i>steering</span></div>
+    </div>
+  </div>
+  <div class="card"><h2>Corners at this speed</h2><table class="kv" id="simCorners"></table></div>
+</section>
+
+<!-- ============================ RUNS ============================ -->
+<section class="view" id="view-runs" hidden>
+  <div class="runs">
+    <div class="card">
+      <div class="card-h"><h2>Recorded Runs</h2><button class="btn" id="btnReload">Reload</button></div>
+      <p class="note">Recorded while the pilot drives (Pilot Steers or Full Auto). Runs with problems are flagged.</p>
+      <div class="runlist" id="runlist"></div>
+    </div>
+    <div class="card" id="runPanel">
+      <div class="card-h"><h2 id="runTitle">Pick a run</h2><a class="btn" id="runCsv" href="#" download hidden>Download CSV</a></div>
+      <p class="note" id="runErr"></p>
+      <div class="events" id="events"></div>
+      <canvas class="chart" id="chRun" style="height:220px" role="img" aria-label="Steering, error and throttle over the run"></canvas>
+      <div class="legend"><span><i class="key" style="background:var(--ink)"></i>steering</span><span><i class="key" style="background:var(--tape-fill)"></i>error</span><span><i class="key" style="background:var(--c-d)"></i>throttle</span><span><i class="key" style="background:var(--bad);opacity:.4"></i>line lost</span><span><i class="key" style="background:var(--warn);opacity:.4"></i>right-line backup</span></div>
+      <div class="row"><button class="btn" id="btnPlay">Play</button><input class="scrub" type="range" id="scrub" min="0" max="0" value="0" aria-label="Frame"><span class="note num" id="frameNo"></span></div>
+      <div class="frameview"><img id="frameImg" alt="Recorded camera frame"><table class="kv" id="frameKv"></table></div>
+    </div>
+  </div>
+</section>
+</main>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (v, d = 2, sign = false) => v == null || Number.isNaN(+v) ? '–' : (sign && v > 0 ? '+' : '') + Number(v).toFixed(d);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const modeName = { user: 'Manual', local_angle: 'Pilot Steers', local: 'Full Auto' };
+let toastT;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3500); }
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const view = () => { const v = (location.hash || '#drive').slice(1); return ['tune', 'diagnose'].includes(v) ? 'drive' : v; };
+
+/* ---------------- routing ---------------- */
+const VIEWS = ['drive', 'diagnose', 'tune', 'simulator', 'runs'];
+function route() {
+  const v = VIEWS.includes(view()) ? view() : 'drive';
+  VIEWS.forEach(n => { $('view-' + n).hidden = n !== v; });
+  document.querySelectorAll('.seg.views a').forEach(a => { const on = a.dataset.view === v; a.classList.toggle('on', on); a.setAttribute('aria-current', on ? 'page' : 'false'); });
+  if (v === 'runs') loadRuns();
+  if (v === 'diagnose') pollDiagnose();
+  if (v === 'tune') { renderTuneProfiles(); schedulePreview(); }
+  if (v === 'simulator') simEnter();
+  drawLive();
+}
+addEventListener('hashchange', route);
+
+/* ---------------- data source (never claim "live" unless it's the car) ---------------- */
+let src = { source: null, live: false, fresh: false, sim_available: false };
+async function pollStatus() {
+  try { src = await api('/api/status'); } catch (e) { src = { source: null, live: false, fresh: false, sim_available: src.sim_available }; }
+  const b = $('srcBadge'), t = $('srcText'), ban = $('srcBanner');
+  let cls, txt, banner = null;
+  if (src.source === 'car' && src.live) { cls = 'live'; txt = 'Live · car'; }
+  else if (src.source === 'car') { cls = 'down'; txt = 'Car: no data'; banner = ['down', `No telemetry from the car${src.age_s != null ? ` for ${src.age_s.toFixed(0)} s` : ''}. Nothing shown here is live.`]; }
+  else if (src.source === 'simulator') { cls = 'sim'; txt = 'Simulator · not the car'; banner = ['sim', `You're driving the SIMULATED car (${src.detail || 'PiRacer simulator'}). Nothing here is the real car.`]; }
+  else if (src.source === 'replay') { cls = 'replay'; txt = 'Replay · not live'; banner = ['replay', `Replaying a recording (${src.detail || 'recorded run'}). Nothing here is live.`]; }
+  else { cls = 'down'; txt = 'No connection'; banner = ['down', 'The dashboard server is unreachable. Nothing shown here is live.']; }
+  b.className = 'src ' + cls; t.textContent = txt;
+  ban.hidden = !banner; if (banner) { ban.firstElementChild.className = banner[0]; ban.firstElementChild.textContent = banner[1]; }
+}
+setInterval(pollStatus, 1000);
+
+/* ---------------- charts ---------------- */
+function prep(cv) {
+  const r = cv.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) { cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, r.width, r.height);
+  return [g, r.width, r.height];
+}
+function axes(g, w, h, lo, hi, ticks, padL) {
+  g.font = '11px ' + css('--mono'); g.fillStyle = css('--secondary'); g.strokeStyle = css('--grid'); g.lineWidth = 1; g.textAlign = 'left';
+  for (const v of ticks) { const y = h - 16 - (v - lo) / (hi - lo) * (h - 26); g.beginPath(); g.moveTo(padL, y); g.lineTo(w, y); g.stroke(); g.fillText((v > 0 ? '+' : '') + v, 2, y + 4); }
+}
+function line(g, xs, ys, color, lo, hi, w, h, padL, width = 1.6) {
+  g.strokeStyle = color; g.lineWidth = width; g.lineJoin = 'round'; g.beginPath(); let pen = false;
+  for (let i = 0; i < xs.length; i++) {
+    const v = ys[i]; if (v == null || Number.isNaN(v)) { pen = false; continue; }
+    const x = padL + xs[i] * (w - padL), y = h - 16 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * (h - 26);
+    pen ? g.lineTo(x, y) : g.moveTo(x, y); pen = true;
+  }
+  g.stroke();
+}
+function niceRange(arrs, minSpan) {
+  let lo = Infinity, hi = -Infinity; arrs.flat().forEach(v => { if (v != null && isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+  if (!isFinite(lo)) return [-1, 1]; const m = Math.max(Math.abs(lo), Math.abs(hi), minSpan); return [-m * 1.1, m * 1.1];
+}
+function traceChart(cv, tr, key, unitTicks) {
+  const [g, w, h] = prep(cv); if (!tr || !tr.t || !tr.t.length) return;
+  const t0 = tr.t[0], t1 = tr.t[tr.t.length - 1], xs = tr.t.map(t => (t - t0) / Math.max(1e-6, t1 - t0));
+  const [lo, hi] = niceRange([tr[key]], 3); const step = hi > 20 ? 10 : hi > 8 ? 5 : 2;
+  const ticks = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+  axes(g, w, h, lo, hi, ticks, 30);
+  line(g, xs, tr[key], css('--tape-fill'), lo, hi, w, h, 30, 2);
+  line(g, xs, tr.steer.map(s => s * hi), css('--ink'), lo, hi, w, h, 30, 1.2);
+  g.fillStyle = css('--secondary'); g.textAlign = 'right'; g.fillText(`${(t1 - t0).toFixed(0)} s`, w - 2, h - 2);
+}
+
+/* lane gauge: where the tape's inside edge is vs the target, plus the steering being sent */
+function drawLane(t) {
+  const cv = $('lane'); if (!cv.getBoundingClientRect().width) return;
+  const [g, w] = prep(cv), pad = 10, X = (v) => pad + Math.max(0, Math.min(1, v)) * (w - 2 * pad);
+  const trackY = 8, trackH = 30, needleY = trackY + trackH + 18;
+  g.fillStyle = css('--mat'); g.beginPath(); g.roundRect(pad, trackY, w - 2 * pad, trackH, 6); g.fill();
+  g.fillStyle = css('--secondary'); for (const v of [0, 0.25, 0.5, 0.75, 1]) g.fillRect(X(v) - .5, trackY + trackH, 1, 4);
+  const target = t && t.target != null ? t.target : null;
+  g.textAlign = 'center';
+  if (t && t.x != null && t.found) {
+    const x = X(t.x);
+    g.fillStyle = css('--tape-fill'); g.globalAlpha = t.source === 'right' ? .55 : 1;
+    g.beginPath(); g.roundRect(x - 9, trackY + 3, 9, trackH - 6, 2); g.fill(); g.globalAlpha = 1;
+    g.fillStyle = css('--ink'); g.fillRect(x - 1, trackY - 2, 2, trackH + 4);
+    if (target != null) { g.strokeStyle = css('--tape'); g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(X(target), trackY + trackH / 2); g.lineTo(x, trackY + trackH / 2); g.stroke(); g.setLineDash([]); }
+  } else {
+    g.fillStyle = css('--secondary'); g.font = '12px ' + css('--sans');
+    g.fillText(t ? (t.status === 'STALE' ? 'camera stale' : 'no line') : 'no data', w / 2, trackY + trackH / 2 + 4);
+  }
+  if (target != null) { g.fillStyle = css('--target'); g.fillRect(X(target) - 1.5, trackY - 5, 3, trackH + 10); }
+  g.strokeStyle = css('--grid'); g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.moveTo(X(0), needleY); g.lineTo(X(1), needleY); g.stroke();
+  const s = t && t.steering != null ? t.steering : 0;
+  g.strokeStyle = css('--ink'); g.beginPath(); g.moveTo(X(.5), needleY); g.lineTo(X(.5 + s / 2), needleY); g.stroke(); g.lineCap = 'butt';
+  g.fillStyle = css('--secondary'); g.font = '11px ' + css('--sans');
+  g.textAlign = 'left'; g.fillText('steer L', X(0), needleY + 15); g.textAlign = 'right'; g.fillText('R', X(1), needleY + 15); g.textAlign = 'center'; g.fillText('0', X(.5), needleY + 15);
+  cv.setAttribute('aria-label', t && t.found && t.x != null ? `Lane gauge: edge at ${fmt(t.x)}, target ${fmt(target)}, error ${fmt(t.error, 3, true)}, steering ${fmt(s, 2, true)}` : 'Lane gauge: no line');
+}
+
+/* ---------------- live telemetry ---------------- */
+const hist = []; let lastSeq = 0, lastTele = null;
+function onTele(items) {
+  for (const t of items) { hist.push(t); lastSeq = Math.max(lastSeq, t.seq); }
+  const cut = (hist.length ? hist[hist.length - 1].t : 0) - 10;
+  while (hist.length && hist[0].t < cut) hist.shift();
+  lastTele = hist[hist.length - 1];
+  updateTiles(lastTele);
+}
+function updateTiles(t) {
+  if (!t) return;
+  const st = t.single_stop ? ['bad', 'Stopped: one line only'] : t.status === 'TRACKING' ? ['ok', t.source === 'right' ? 'Tracking (right-line backup)' : 'Tracking']
+           : t.status === 'STALE' ? ['bad', 'Camera stale'] : ['warn', 'Line lost'];
+  $('status').innerHTML = `<span class="badge ${st[0]}">${st[1]}</span>` + (t.web_driving ? ' <span class="badge warn">Web driving</span>' : '')
+    + ` <span class="badge plain">${modeName[t.mode] || esc(t.mode)}</span>`;
+  $('tX').textContent = `${fmt(t.x)} / ${fmt(t.target)}`;
+  $('tErr').textContent = fmt(t.error, 3, true);
+  $('tSteer').innerHTML = fmt(t.steering, 2, true) + (t.steering > 0.02 ? ' <small>right</small>' : t.steering < -0.02 ? ' <small>left</small>' : '');
+  $('tThr').innerHTML = `${fmt(t.throttle)} <small>· ${fmt(t.pwm, 0)}</small>`;
+  $('tMot').textContent = t.motion == null ? '–' : `${fmt(t.motion, 1)} ${t.motion >= 2.5 ? 'rolling' : 'still'}`;
+  $('tLines').textContent = t.both ? 'both' : t.found ? 'one' : 'none';
+  $('tConf').textContent = fmt(t.conf);
+  $('tHz').textContent = `${fmt(t.hz, 0)} Hz · ${fmt(t.proc_ms, 0)} ms`;
+  const errs = hist.filter(h => h.error != null && h.status === 'TRACKING').map(h => Math.abs(h.error));
+  $('tErrAvg').textContent = errs.length ? fmt(errs.reduce((a, b) => a + b, 0) / errs.length, 3) : '–';
+  $('tErrMax').textContent = errs.length ? fmt(Math.max(...errs), 3) : '–';
+  const piloted = hist.filter(h => h.mode !== 'user');
+  $('tTrk').textContent = piloted.length ? Math.round(100 * piloted.filter(h => h.status === 'TRACKING').length / piloted.length) + '%' : '–';
+  const lim = knobVal(t.mode === 'user' ? 'max_user' : t.mode === 'local_angle' ? 'max_pilot_steers' : 'max_auto'), top = knobVal('top_throttle');
+  $('tLim').textContent = lim == null ? '–' : `${fmt(Math.min(lim, top ?? 1))} · ${pwmOf(Math.min(lim, top ?? 1))}`;
+  $('tSection').textContent = `${t.section || 'straight'} · ${Math.round(100 * (t.corner_weight || 0))}%`;
+  $('tCurv').textContent = t.curv == null ? '–' : `${fmt(t.curv, 2)} 1/m`;
+  $('tGains').textContent = t.kp_used == null ? '–' : `${fmt(t.kp_used, 2)} · ${fmt(t.kd_used, 2)}`;
+  $('tSpeedTarget').textContent = t.speed_target == null ? '–' : `${fmt(t.speed_target)} · ${t.speed_reason || ''}`;
+  document.querySelectorAll('#modeSeg button').forEach(b => { const on = b.dataset.mode === t.mode; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+}
+function drawLive() {
+  if (view() !== 'drive' && view() !== '') return;
+  drawLane(src.fresh ? lastTele : null);
+  if (!hist.length) return;
+  const t1 = hist[hist.length - 1].t, xs = hist.map(h => (h.t - (t1 - 10)) / 10);
+  let [g, w, h] = prep($('chSteer')); axes(g, w, h, -1, 1, [-1, -0.5, 0, 0.5, 1], 30);
+  line(g, xs, hist.map(h => h.error), css('--tape-fill'), -1, 1, w, h, 30);
+  line(g, xs, hist.map(h => h.p), css('--c-p'), -1, 1, w, h, 30);
+  line(g, xs, hist.map(h => h.d), css('--c-d'), -1, 1, w, h, 30);
+  line(g, xs, hist.map(h => h.steering), css('--ink'), -1, 1, w, h, 30, 2.2);
+  [g, w, h] = prep($('chSpeed')); axes(g, w, h, -0.2, 1, [0, 0.5, 1], 30);
+  line(g, xs, hist.map(h => h.motion == null ? null : h.motion / 10), css('--secondary'), -0.2, 1, w, h, 30, 1.2);
+  line(g, xs, hist.map(h => h.stick_throttle), css('--c-p'), -0.2, 1, w, h, 30);
+  line(g, xs, hist.map(h => h.throttle), css('--ink'), -0.2, 1, w, h, 30, 2.2);
+}
+setInterval(drawLive, 100);
+function connect() { const es = new EventSource('/events?since=' + lastSeq); es.onmessage = (e) => onTele(JSON.parse(e.data)); }
+function startVideo() { $('video').src = '/video?ts=' + Date.now(); }
+$('video').addEventListener('error', () => setTimeout(startVideo, 1500));
+
+/* ---------------- knobs ---------------- */
+let knobState = [], speedProfiles = null;
+const knobVal = (id) => { const k = knobState.find(k => k.id === id); return k ? k.value : null; };
+const knobDef = (id) => knobState.find(k => k.id === id);
+const pwmOf = (v) => Math.round(370 + 37 * Math.max(0, v));
+const pwmText = (v) => `≈ PWM ${pwmOf(v)} · ${Math.round(100 * v)}% of full stick` + (v < 0.45 ? ' · may not move' : '');
+async function applyKnobs(vals, msg) {
+  try { const r = await api('/api/knobs', vals); for (const [k, v] of Object.entries(r.applied)) { const ks = knobState.find(x => x.id === k); if (ks) ks.value = v; }
+        renderKnobs(); syncBigKnobs(); schedulePreview(); if (msg) toast(msg); return r.applied; } catch (e) { toast('Not applied: ' + e.message); }
+}
+async function loadState() {
+  const s = await api('/api/state'); knobState = s.knobs; speedProfiles = s.profiles;
+  $('saveNote').textContent = (s.saved ? 'Saved tuning is active (tuning.json). ' : '') + 'Changes apply on the next frame. Save keeps them for the next start.';
+  renderKnobs(); syncBigKnobs(); renderTuneProfiles(); renderProfiles(speedProfiles, false, true);
+}
+function renderKnobs() {
+  const groups = {}; knobState.forEach(k => (groups[k.group] ||= []).push(k));
+  const box = $('knobs'); box.innerHTML = '';
+  for (const [name, ks] of Object.entries(groups)) {
+    const speed = name === 'Speed limits';
+    const gEl = document.createElement('div'); gEl.className = 'kgroup';
+    gEl.innerHTML = `<h3>${esc(name)}</h3>` + (speed ? `<div class="presets"><button class="btn small" data-p="0.55">All modes 0.55</button><button class="btn small" data-p="0.62">0.62</button><button class="btn small" data-p="0.70">0.70</button></div>` : '');
+    if (speed) gEl.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { const v = +b.dataset.p;
+      applyKnobs({ top_throttle: Math.max(v, knobVal('top_throttle') ?? v), max_user: v, max_pilot_steers: v, max_auto: v }, 'Max speed ' + v + ' in every mode'); });
+    for (const k of ks) {
+      const d = document.createElement('div'); d.className = 'knob';
+      const changed = k.default != null && Math.abs(k.value - k.default) > 1e-9;
+      d.innerHTML = `<label for="k_${k.id}" class="${changed ? 'changed' : ''}">${esc(k.label)}</label>
+        <input type="number" id="kn_${k.id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${k.value}" aria-label="${esc(k.label)} value">
+        <input type="range" id="k_${k.id}" min="${k.min}" max="${k.max}" step="${k.step}" value="${k.value}">
+        <span class="help">${speed ? `<span class="pwm">${pwmText(k.value)}</span><br>` : ''}${esc(k.help)}${k.default != null ? ` Default ${k.default}.` : ''}</span>`;
+      wireKnob(k, d.querySelector('input[type=range]'), d.querySelector('input[type=number]'), d.querySelector('label'), d.querySelector('.pwm'));
+      gEl.appendChild(d);
+    }
+    box.appendChild(gEl);
+  }
+}
+function wireKnob(k, rng, num, lbl, pwmEl) {
+  let tmr;
+  const send = (v) => { clearTimeout(tmr); tmr = setTimeout(async () => {
+    try { const r = await api('/api/knobs', { [k.id]: v }); for (const [id, value] of Object.entries(r.applied)) { const state = knobDef(id); if (state) state.value = value; } k.value = r.applied[k.id]; rng.value = num.value = k.value;
+          lbl.classList.toggle('changed', k.default != null && Math.abs(k.value - k.default) > 1e-9); syncBigKnobs(); schedulePreview(); }
+    catch (e) { toast('Not applied: ' + e.message); } }, 120); };
+  rng.addEventListener('input', () => { num.value = rng.value; if (pwmEl) pwmEl.textContent = pwmText(+rng.value); send(rng.value); });
+  num.addEventListener('change', () => { rng.value = num.value; send(num.value); });
+}
+const BIG = ['kp', 'kd', 'target_x_ratio', 'lookahead_ratio', 'speed_straight', 'speed_corner', 'speed_transition', 'speed_ramp_down', 'speed_ramp_up', 'straight_kp', 'straight_kd', 'corner_kp', 'corner_kd', 'max_auto'];
+let bigWired = false;
+function syncBigKnobs() {
+  for (const id of BIG) {
+    const k = knobDef(id); if (!k) continue;
+    const r = $('bk_' + id), n = $('bkn_' + id);
+    if (document.activeElement !== r && document.activeElement !== n) { r.value = n.value = k.value; }
+    r.min = n.min = k.min; r.max = n.max = k.max; r.step = n.step = k.step;
+    $('lbl_' + id).classList.toggle('changed', k.default != null && Math.abs(k.value - k.default) > 1e-9);
+    if (!bigWired) wireKnob(k, r, n, $('lbl_' + id), null);
+  }
+  bigWired = true;
+}
+$('btnSave').onclick = async () => { try { const r = await api('/api/save', {}); toast('Saved to ' + r.saved); loadState(); } catch (e) { toast(e.message); } };
+$('btnRevert').onclick = async () => { try { await api('/api/revert', {}); toast('Back to line_config.py values'); loadState(); } catch (e) { toast(e.message); } };
+
+/* ---------------- speed profiles (simulator schedule) ---------------- */
+function fragileText(p) {
+  const r = p.robustness || {};
+  return `Works on the assumed car, but with the unmeasured values varied it left the track ${r.off_track_in_4_runs ?? "?"} time(s) across 4 simulated runs (the car is put back after each)`
+    + (r.unstable ? ` and was unstable in ${r.unstable} of ${r.draws} variations` : '') + '. Measure the car (sim/CALIBRATION.md), then recompute.';
+}
+function profRows() { return (speedProfiles && speedProfiles.profiles) || []; }
+function schedFor(thr) {
+  const P = profRows().slice().sort((a, b) => a.straight_cmd - b.straight_cmd); if (!P.length || thr == null) return null;
+  if (thr <= P[0].straight_cmd) return { ...P[0], interp: false };
+  if (thr >= P[P.length - 1].straight_cmd) return { ...P[P.length - 1], interp: false };
+  for (let i = 0; i < P.length - 1; i++) { const a = P[i], b = P[i + 1];
+    if (thr >= a.straight_cmd && thr <= b.straight_cmd) { const f = (thr - a.straight_cmd) / (b.straight_cmd - a.straight_cmd);
+      return { profile: f < .15 ? a.profile : f > .85 ? b.profile : `${a.profile}–${b.profile}`, kp: +(a.kp + f * (b.kp - a.kp)).toFixed(1), kd: +(a.kd + f * (b.kd - a.kd)).toFixed(2), straight_cmd: thr, interp: f >= .15 && f <= .85 }; } }
+}
+function currentSpeed() {
+  if (lastTele && src.fresh && lastTele.mode === 'local' && (lastTele.throttle || 0) > 0.3) return +lastTele.throttle.toFixed(2);
+  const plan = knobVal('speed_straight'); if (plan) return plan;
+  return knobVal('max_auto') ?? 0.6;
+}
+function renderTuneProfiles() {
+  const rows = profRows(); const spd = currentSpeed(); const s = schedFor(spd);
+  if (!$('tuneSpeed').dataset.touched) { $('tuneSpeed').value = spd.toFixed(2); $('tuneSpeedNumber').value = $('tuneSpeed').value; }
+  const box = $('tuneSuggest');
+  if (!rows.length) { box.innerHTML = '<span class="note">No simulator schedule found (pi/gain_schedule.json). Generate it on the Mac with python3 -m sim.tune.</span>'; return; }
+  box.innerHTML = s ? `<div><div class="note">For your speed ≈ ${spd.toFixed(2)} (${esc(s.profile)}), the simulator suggests</div><div class="gains">KP ${fmt(s.kp, 1)} · KD ${fmt(s.kd, 2)}</div></div>
+    <button class="btn primary" id="useSched">Use These</button><span class="note">You have KP ${fmt(knobVal('kp'), 1)} · KD ${fmt(knobVal('kd'), 2)}.</span>` : '';
+  const u = $('useSched'); if (u) u.onclick = () => applyKnobs({ kp: s.kp, kd: s.kd }, `KP ${s.kp} · KD ${s.kd} applied`);
+  $('tuneProfiles').innerHTML = '<tr><th>Speed</th><th>Throttle</th><th>m/s</th><th>KP · KD</th><th>Sim lap</th><th>Holds up if the car differs?</th><th></th></tr>' + rows.map(p =>
+    `<tr class="${Math.abs(p.straight_cmd - spd) < .035 ? 'cur' : ''}"><td>${esc(p.profile)} ${p.live_verified ? '<span class="badge ok plain">✓ car</span>' : ''}</td><td>${p.straight_cmd.toFixed(2)}${p.corner_cmd < p.straight_cmd ? ' / ' + p.corner_cmd.toFixed(2) : ''}</td><td>${p.straight_mps}</td>
+     <td><b>${p.kp} · ${p.kd}</b></td><td>${p.lap_s ?? '–'} s</td><td>${p.robust ? 'yes' : `<span class="badge warn plain" title="${esc(fragileText(p))}">⚠ fragile</span>`}</td><td><button class="btn small" data-tp="${esc(p.profile)}">Use</button></td></tr>`).join('');
+  $('tuneProfiles').querySelectorAll('[data-tp]').forEach(b => b.onclick = async () => {
+    try { await api('/api/profile', { name: b.dataset.tp }); toast('Profile ' + b.dataset.tp + ' applied (speed plan + KP/KD)'); loadState(); } catch (e) { toast(e.message); } });
+}
+
+/* ---------------- tune preview (simulator) ---------------- */
+let pvTimer, pvSeq = 0;
+$('tuneSpeed').addEventListener('input', () => { $('tuneSpeed').dataset.touched = 1; $('tuneSpeedNumber').value = $('tuneSpeed').value; schedulePreview(); });
+$('tuneSpeedNumber').addEventListener('change', () => {
+  const value = Number($('tuneSpeedNumber').value);
+  if (!Number.isFinite(value)) return;
+  $('tuneSpeed').value = Math.min(1, Math.max(0.45, value));
+  $('tuneSpeedNumber').value = $('tuneSpeed').value;
+  $('tuneSpeed').dataset.touched = 1;
+  schedulePreview();
+});
+function schedulePreview() { if (!$('advancedTools')?.open) return; clearTimeout(pvTimer); pvTimer = setTimeout(runPreview, 350); }
+async function runPreview() {
+  if (!src.sim_available) { $('pvBody').innerHTML = `<p class="note">${esc(src.sim_reason || 'The simulator isn\'t available here.')} The table above still has the simulator's starting gains for each speed.</p>`; prep($('chStep')); return; }
+  const kp = knobVal('kp'), kd = knobVal('kd'), cmd = +$('tuneSpeed').value; if (kp == null) return;
+  const my = ++pvSeq; $('tuneSpeedNote').innerHTML = '<span class="spinner"></span>';
+  try {
+    const r = await api('/api/sim', { action: 'evaluate', cmd, kp, kd });
+    if (my !== pvSeq) return;
+    $('tuneSpeedNote').textContent = `${r.speed.mps} m/s in the model`;
+    $('pvBody').innerHTML = verdictHtml(r) + metricsHtml(r);
+    traceChart($('chStep'), r.step.trace, 'err_cm');
+  } catch (e) { if (my === pvSeq) { $('tuneSpeedNote').textContent = ''; $('pvBody').innerHTML = `<p class="note">${esc(e.message)}</p>`; } }
+}
+function verdictHtml(r) { return `<div class="issues">${r.verdict.map(v => `<div class="issue ${v.level}"><span class="lvl badge ${v.level}">${v.level === 'ok' ? 'Good' : v.level === 'bad' ? 'Problem' : 'Watch'}</span><div class="txt"><p>${esc(v.text)}</p></div></div>`).join('')}</div>`; }
+function metricsHtml(r) {
+  const L = r.linear || {}, q = r.requirements || {}, S = r.step || {}, P = r.lap || {};
+  const m = (val, unit, label, good) => `<div class="metric ${good == null ? '' : good ? 'ok' : 'warn'}"><b>${val == null ? '–' : val}${unit}</b><span>${label}</span></div>`;
+  return `<div class="metrics" style="margin-top:10px">${m(L.stable ? 'stable' : 'UNSTABLE', '', 'stability', !!L.stable)}${m(L.pm_deg != null ? Math.round(L.pm_deg) : null, '°', `phase margin (≥ ${q.pm_deg})`, L.pm_deg >= q.pm_deg)}
+    ${m(L.zeta != null ? L.zeta.toFixed(2) : null, '', `damping (≥ ${q.zeta})`, L.zeta >= q.zeta)}${m(L.delay_margin_ms != null ? Math.round(L.delay_margin_ms) : null, ' ms', `delay margin (≥ ${q.delay_margin_ms})`, L.delay_margin_ms >= q.delay_margin_ms)}
+    ${m(S.overshoot_pct != null ? Math.round(S.overshoot_pct) : null, '%', 'overshoot', S.overshoot_pct <= 35)}${m(S.settle_s, ' s', 'settle time', S.settle_s <= 3.5)}
+    ${m(P.err_mean_cm, ' cm', 'avg error, lap', null)}${m(P.lap_s, ' s', 'sim lap', null)}${m(P.off_track, '', 'off track', P.off_track === 0)}</div>`;
+}
+function liveCompare() {
+  const piloted = hist.filter(h => h.mode !== 'user' && h.error != null);
+  if (!src.fresh || piloted.length < 40) { $('pvLive').innerHTML = src.source === 'simulator' ? 'Drive the simulated car in Pilot Steers or Full Auto to compare.' : 'Drive in Pilot Steers or Full Auto to compare with the real car.'; return; }
+  const errs = piloted.map(h => Math.abs(h.error)); const avg = errs.reduce((a, b) => a + b, 0) / errs.length;
+  $('pvLive').innerHTML = `${src.source === 'car' ? 'Car' : 'Simulated car'}, last 10 s: average error ${avg.toFixed(3)}, worst ${Math.max(...errs).toFixed(3)} of the image width. See <a href="#diagnose">Diagnose</a> for what to change.`;
+}
+setInterval(() => { if (view() === 'tune') liveCompare(); }, 1000);
+
+/* ---------------- diagnose ---------------- */
+let lastDiag = null;
+function missionBadge() {
+  const s = src.source === 'car' && src.live ? 'Live car' : src.source === 'simulator' ? 'Simulator' : src.source === 'replay' ? 'Recording' : 'No live car';
+  $('missionSource').textContent = s;
+  $('missionSource').className = 'badge ' + (src.source === 'car' && src.live ? 'ok' : src.source ? 'plain' : 'bad');
+  $('missionAllowed').textContent = src.source === 'car' && src.live ? (lastTele && lastTele.mode === 'local' ? 'Full Auto active' : 'No motion command') : 'No motion command';
+}
+function renderMissionIssue(issues) {
+  missionBadge();
+  const top = (issues || [])[0];
+  const icon = { bad: '⛔', warn: '⚠️', info: '→', ok: '✅' };
+  $('missionIcon').textContent = top ? (icon[top.level] || '·') : '…';
+  $('missionTitle').textContent = top ? top.title : 'No diagnosis yet';
+  $('missionEvidence').textContent = top ? (top.evidence || top.fix || '') : 'Run an evaluation to inspect the camera, loop, tracking, and gains.';
+  const fix = $('missionFix');
+  fix.hidden = !top || !top.apply;
+  fix.textContent = top && top.apply_label ? top.apply_label : 'Apply recommended fix';
+  fix.onclick = async () => {
+    if (!top || !top.apply) return;
+    const applied = await applyKnobs(top.apply);
+    if (applied) { $('missionResult').textContent = 'Fix applied; checking again…'; await pollDiagnose(); }
+  };
+}
+async function pollDiagnose() {
+  try { lastDiag = await api('/api/diagnose'); } catch (e) { $('missionTitle').textContent = 'Dashboard check failed'; $('missionEvidence').textContent = e.message; missionBadge(); return; }
+  const issues = lastDiag.issues || [], bad = issues.filter(i => i.level === 'bad').length, warn = issues.filter(i => i.level === 'warn').length;
+  renderMissionIssue(issues);
+  const c = $('diagCount'); c.hidden = !(bad + warn); c.textContent = bad + warn; c.className = 'count ' + (bad ? 'bad' : 'warn');
+  const top = issues[0]; const ti = $('topIssue');
+  ti.innerHTML = top ? `<span class="badge ${top.level}">${top.level === 'ok' ? 'OK' : top.level === 'bad' ? 'Problem' : top.level === 'warn' ? 'Watch' : 'Note'}</span><span><b>${esc(top.title)}</b><br><span class="note">${esc(top.evidence)}</span></span>` : '<span class="note">No diagnosis yet.</span>';
+  if (view() !== 'drive') return;
+  const st = lastDiag.status || {};
+  const who = st.source === 'car' ? 'the car' : st.source === 'simulator' ? 'the simulated car' : st.source === 'replay' ? 'the replay' : 'the car';
+  $('dgIcon').textContent = bad ? '⛔' : warn ? '⚠️' : '✅';
+  $('dgTitle').textContent = !st.fresh ? `No data from ${who}` : bad ? `${bad} problem${bad > 1 ? 's' : ''} with ${who}` : warn ? `${warn} thing${warn > 1 ? 's' : ''} to watch on ${who}` : `Nothing wrong spotted on ${who}`;
+  $('dgIssues').innerHTML = issues.map((i, n) => `<div class="issue ${i.level}"><span class="lvl badge ${i.level}">${i.level === 'ok' ? 'OK' : i.level === 'bad' ? 'Problem' : i.level === 'warn' ? 'Watch' : 'Note'}</span>
+    <div class="txt"><h2>${esc(i.title)}</h2><p class="num" style="font-size:12px">${esc(i.evidence)}</p>
+    <p class="why">${i.cause ? '<b>Why:</b> ' + esc(i.cause) + ' ' : ''}<b>Fix:</b> ${esc(i.fix)}</p></div>
+    ${i.apply ? `<button class="btn primary act" data-fix="${n}">${esc(i.apply_label || 'Apply')}</button>` : ''}</div>`).join('');
+  $('dgIssues').querySelectorAll('[data-fix]').forEach(b => b.onclick = async () => { const i = issues[+b.dataset.fix];
+    const applied = await applyKnobs(i.apply); if (applied) toast('Applied: ' + Object.entries(applied).map(([k, v]) => `${k} = ${v}`).join(', ')); pollDiagnose(); });
+  const h = (await api('/api/tuning').catch(() => ({}))).health;
+  const M = (v, label, lvl) => `<div class="metric ${lvl || ''}"><b>${v}</b><span>${label}</span></div>`;
+  $('dgMetrics').innerHTML = h ? M(h.swing_rate, 'swings / s', h.swing_rate > .9 ? 'bad' : h.swing_rate > .55 ? 'warn' : 'ok') + M(h.err_p90, 'error, 90% under', h.err_p90 > .22 ? 'warn' : 'ok')
+    + M(h.jitter, 'jitter', h.jitter > .09 ? 'warn' : 'ok') + M(Math.round(100 * h.saturated) + '%', 'steering at limit', h.saturated > .2 ? 'bad' : h.saturated > .1 ? 'warn' : 'ok')
+    + M(Math.round(100 * h.tracked) + '%', 'tracked', h.tracked < .85 ? 'bad' : 'ok') : '<span class="note">Drive in Pilot Steers or Full Auto for about 10 s.</span>';
+}
+setInterval(pollDiagnose, 1000);
+$('missionCheck').onclick = async () => {
+  $('missionCheck').disabled = true; $('missionResult').innerHTML = '<span class="spinner"></span> checking…';
+  try {
+    await pollDiagnose();
+    await pollTuning();
+    $('missionResult').textContent = 'Camera, tracking and tuning checks refreshed.';
+  } catch (e) { $('missionResult').textContent = 'Check incomplete: ' + e.message; }
+  finally { $('missionCheck').disabled = false; }
+};
+$('missionSafe').onclick = async () => {
+  const p = profRows().find(x => x.profile === 'Slow') || profRows().find(x => x.profile === 'Crawl');
+  if (!p) { toast('No Safe profile is loaded'); return; }
+  try { await applyKnobs({ max_auto: p.straight_cmd, max_pilot_steers: p.straight_cmd, top_throttle: Math.max(p.straight_cmd, knobVal('top_throttle') || 0), kp: p.kp, kd: p.kd, speed_straight: p.straight_cmd, speed_corner: p.corner_cmd }, 'Safe mode prepared'); $('missionResult').textContent = `Safe mode prepared at ${p.straight_cmd.toFixed(2)}; it did not start driving.`; }
+  catch (e) { $('missionResult').textContent = e.message; }
+};
+
+/* ---------------- simulator view ---------------- */
+let simRes = null, simMapRes = null, simBestRes = null, simEntered = false;
+function simEnter() {
+  renderProfiles(speedProfiles, false, true);
+  if (!src.sim_available) { $('simBusy').textContent = src.sim_reason || 'The simulator isn\'t available here.'; ['simRun', 'simBest'].forEach(id => $(id).disabled = true); return; }
+  ['simRun', 'simBest'].forEach(id => $(id).disabled = false);
+  if (!simEntered) { simEntered = true; const s = schedFor(currentSpeed()); $('simCmd').value = currentSpeed(); if (s) { $('simKp').value = s.kp; $('simKd').value = s.kd; } simSpeedChanged(); simRun(); }
+  else { drawSimMap(); drawSimTrack(); }
+}
+let spdTimer;
+function simSpeedChanged() {
+  $('simCmdV').textContent = (+$('simCmd').value).toFixed(2);
+  clearTimeout(spdTimer); spdTimer = setTimeout(async () => {
+    try { const r = await api('/api/sim', { action: 'speed', cmd: +$('simCmd').value });
+      $('simSpeedInfo').textContent = r.moves ? `${r.mps} m/s · PWM ${r.pwm} · corners OK up to ${r.corner_mps_limit} m/s` : `doesn't move the car (PWM ${r.pwm})`;
+      $('simCorners').innerHTML = '<tr><th>Corner</th><th>Path radius</th><th>Steering needed / available</th><th style="text-align:right">Verdict</th></tr>' + r.corners.map(c => `<tr><td>${c.direction} at ${c.s0} m</td><td class="num">${c.radius_path_m} m</td><td class="num">${c.steer_needed_deg}° / ${c.steer_available_deg}°</td><td>${esc(c.verdict)}</td></tr>`).join('');
+      loadSimMap(); } catch (e) { $('simSpeedInfo').textContent = e.message; } }, 250);
+}
+$('simCmd').addEventListener('input', simSpeedChanged);
+$('simUseSched').onclick = () => { const s = schedFor(+$('simCmd').value); if (s) { $('simKp').value = s.kp; $('simKd').value = s.kd; simRun(); } };
+$('simUseMine').onclick = () => { $('simKp').value = knobVal('kp'); $('simKd').value = knobVal('kd'); simRun(); };
+['simKp', 'simKd'].forEach(id => $(id).addEventListener('change', simRun));
+async function simRun() {
+  if (!src.sim_available) return;
+  $('simBusy').innerHTML = '<span class="spinner"></span> simulating…';
+  try {
+    simRes = await api('/api/sim', { action: 'evaluate', cmd: +$('simCmd').value, kp: +$('simKp').value, kd: +$('simKd').value });
+    $('simBusy').textContent = `done in ${simRes.seconds} s`;
+    $('simVerdict').innerHTML = verdictHtml(simRes); $('simMetrics').innerHTML = metricsHtml(simRes).replace('class="metrics" style="margin-top:10px"', 'class="metrics"');
+    traceChart($('simStep'), simRes.step.trace, 'err_cm'); traceChart($('simLapErr'), simRes.lap_trace, 'err_cm'); drawSimTrack(); drawSimMap();
+  } catch (e) { $('simBusy').textContent = e.message; }
+}
+$('simRun').onclick = simRun;
+$('simBest').onclick = async () => {
+  $('simBusy').innerHTML = '<span class="spinner"></span> searching every KP/KD at this speed (5–20 s)…'; $('simBest').disabled = true;
+  try {
+    const r = await api('/api/sim', { action: 'recommend', cmd: +$('simCmd').value });
+    if (r.error) { $('simBusy').textContent = r.error; return; }
+    simBestRes = r; $('simKp').value = r.kp; $('simKd').value = r.kd;
+    toast(`Best for ${(+$('simCmd').value).toFixed(2)}: KP ${r.kp} · KD ${r.kd}${r.robust ? ' (robust)' : ' (not robust to unmeasured values)'}`);
+    await simRun();
+  } catch (e) { $('simBusy').textContent = e.message; } finally { $('simBest').disabled = false; }
+};
+$('simApply').onclick = () => applyKnobs({ kp: +$('simKp').value, kd: +$('simKd').value }, `Applied to the ${src.source === 'car' ? 'car' : src.source || 'car'}: KP ${$('simKp').value} · KD ${$('simKd').value}`);
+async function loadSimMap() {
+  if (!src.sim_available) return;
+  $('mapNote').innerHTML = '<span class="spinner"></span> mapping (first time per speed takes a few seconds)';
+  try { simMapRes = await api('/api/sim', { action: 'map', cmd: +$('simCmd').value }); $('mapNote').textContent = `at ${simMapRes.mps} m/s · click a cell to try it`; drawSimMap(); }
+  catch (e) { $('mapNote').textContent = e.message; }
+}
+let mapGeom = null;
+function drawSimMap() {
+  const cv = $('simMap'); if (!simMapRes || !cv.getBoundingClientRect().width) return;
+  const [g, w, h] = prep(cv), padL = 34, padB = 22, kps = simMapRes.kp, kds = simMapRes.kd;
+  const cw = (w - padL) / kps.length, ch = (h - padB) / kds.length; mapGeom = { padL, padB, cw, ch, kps, kds, h };
+  const col = [css('--bad'), css('--warn'), css('--ok')];
+  for (const [kp, kd, cls] of simMapRes.cells) {
+    const i = kps.indexOf(kp), j = kds.indexOf(kd); g.fillStyle = col[cls]; g.globalAlpha = cls === 2 ? .55 : .35;
+    g.fillRect(padL + i * cw + 1, h - padB - (j + 1) * ch + 1, cw - 2, ch - 2);
+  }
+  g.globalAlpha = 1; g.fillStyle = css('--secondary'); g.font = '11px ' + css('--mono'); g.textAlign = 'center';
+  kps.forEach((kp, i) => { if (i % 2 === 1 && i < kps.length - 2) g.fillText(kp, padL + (i + .5) * cw, h - 6); });
+  g.textAlign = 'right'; kds.forEach((kd, j) => { if (j % 2 === 0) g.fillText(kd.toFixed(1), padL - 4, h - padB - (j + .5) * ch + 4); });
+  g.textAlign = 'left'; g.fillText('KD', 2, 12); g.textAlign = 'right'; g.fillText('KP →', w - 2, h - 6);
+  const mark = (kp, kd, color, r) => { const x = padL + ((kp - kps[0]) / (kps[1] - kps[0]) + .5) * cw, y = h - padB - ((kd - kds[0]) / (kds[1] - kds[0]) + .5) * ch;
+    g.strokeStyle = color; g.lineWidth = 2.5; g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke(); };
+  const mine = knobVal('kp'); if (mine != null) mark(mine, knobVal('kd'), css('--target'), 6);
+  mark(+$('simKp').value, +$('simKd').value, css('--ink'), 8);
+}
+$('simMap').addEventListener('click', (e) => {
+  if (!mapGeom) return; const r = $('simMap').getBoundingClientRect(); const x = e.clientX - r.left, y = e.clientY - r.top;
+  const i = Math.floor((x - mapGeom.padL) / mapGeom.cw), j = Math.floor((mapGeom.h - mapGeom.padB - y) / mapGeom.ch);
+  if (i < 0 || j < 0 || i >= mapGeom.kps.length || j >= mapGeom.kds.length) return;
+  $('simKp').value = mapGeom.kps[i]; $('simKd').value = mapGeom.kds[j]; simRun();
+});
+function drawSimTrack() {
+  const cv = $('simTrack'); if (!simRes || !cv.getBoundingClientRect().width) return;
+  const [g, w, h] = prep(cv); const T = simRes.track, pts = [...T.left, ...T.right];
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const s = Math.min((w - 20) / (x1 - x0), (h - 20) / (y1 - y0)), ox = (w - (x1 - x0) * s) / 2, oy = (h - (y1 - y0) * s) / 2;
+  const P = (p) => [ox + (p[0] - x0) * s, h - (oy + (p[1] - y0) * s)];
+  g.fillStyle = css('--mat'); g.beginPath(); T.left.forEach((p, i) => { const [x, y] = P(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath();
+  T.right.slice().reverse().forEach((p, i) => { const [x, y] = P(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath(); g.fill('evenodd');
+  for (const side of [T.left, T.right]) { g.strokeStyle = css('--tape-fill'); g.lineWidth = 3; g.beginPath(); side.forEach((p, i) => { const [x, y] = P(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath(); g.stroke(); }
+  g.strokeStyle = css('--ink'); g.lineWidth = 1.6; g.beginPath(); simRes.path.forEach((p, i) => { const [x, y] = P(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  if (simRes.path.length) { const [x, y] = P(simRes.path[0]); g.fillStyle = css('--target'); g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill(); }
+}
+function renderProfiles(pr, recomputing, force) {
+  if (recomputing != null) { $('profRecompute').disabled = !!recomputing || !src.sim_available; $('profRecompute').textContent = recomputing ? 'Recomputing…' : 'Recompute All'; }
+  if (!pr || !pr.profiles) return;
+  const sig = JSON.stringify(pr); if (!force && sig === renderProfiles.sig) return; renderProfiles.sig = sig;
+  $('profMeta').textContent = pr.generated ? `generated ${pr.generated} · ${pr.assumed_parameters ? pr.assumed_parameters.length : '?'} unmeasured values · ${pr.live_count || 0} car-verified` : '';
+  $('profTable').innerHTML = '<tr><th>Speed</th><th>Throttle (straight / corner)</th><th>m/s</th><th>Start KP · KD</th><th>Model KP · KD</th><th>Phase margin</th><th>Settle</th><th>Sim lap</th><th></th></tr>' +
+    pr.profiles.map(p => `<tr><td>${esc(p.profile)} ${p.live_verified ? '<span class="badge ok plain">✓ car</span>' : p.robust ? '' : `<span class="badge warn plain" title="${esc(fragileText(p))}">⚠ fragile</span>`}</td>
+      <td>${p.straight_cmd.toFixed(2)} / ${p.corner_cmd.toFixed(2)}</td><td>${p.straight_mps}</td><td><b>${p.kp} · ${p.kd}</b></td><td>${p.model_kp ?? p.kp} · ${p.model_kd ?? p.kd}</td>
+      <td>${p.pm_deg}°</td><td>${p.step_settle_s ?? '–'} s</td><td>${p.lap_s ?? '–'} s</td>
+      <td><span class="row" style="justify-content:flex-end"><button class="btn small" data-try="${p.straight_cmd}" data-kp="${p.kp}" data-kd="${p.kd}">Simulate</button><button class="btn small" data-apply="${esc(p.profile)}">Apply</button></span></td></tr>`).join('');
+  $('profTable').querySelectorAll('[data-apply]').forEach(b => b.onclick = async () => {
+    try { await api('/api/profile', { name: b.dataset.apply }); toast('Profile ' + b.dataset.apply + ' applied (speed plan + KP/KD)'); loadState(); } catch (e) { toast(e.message); } });
+  $('profTable').querySelectorAll('[data-try]').forEach(b => b.onclick = () => { $('simCmd').value = b.dataset.try; $('simKp').value = b.dataset.kp; $('simKd').value = b.dataset.kd; simSpeedChanged(); simRun(); });
+}
+
+/* ---------------- auto-tune ---------------- */
+async function pollTuning() {
+  try {
+    const j = await api('/api/tuning');
+    if (j.profiles && JSON.stringify(j.profiles) !== JSON.stringify(speedProfiles)) { speedProfiles = j.profiles; renderTuneProfiles(); }
+    renderProfiles(j.profiles, j.recomputing);
+    const a = j.autotune; if (!a) return;
+    $('atState').textContent = a.state === 'running' ? `Running: ${a.strategy} (${a.phase})` : ({not_run:'Ready',passed:'Passed',insufficient:'Not enough data',retune:'Run again',failed:'Failed',stopped:'Stopped'}[a.result] || a.state);
+    $('atState').className = 'badge ' + (a.state === 'running' ? 'warn' : a.result === 'passed' ? 'ok' : 'plain');
+    $('atMsg').textContent = a.message || '';
+    $('atKeep').disabled = !(a.best && a.state !== 'running');
+    $('atSave').disabled = !(a.verified && a.verified.length && a.state !== 'running');
+    renderSectionTune(a);
+    $('atTable').innerHTML = (a.levels.length ? '<tr><th>Step · speed (straight / corner)</th><th style="text-align:right">KP · KD · result</th></tr>' : '') +
+      a.levels.slice(-10).reverse().map(l => `<tr><td>${esc(l.phase)} · ${l.straight.toFixed(2)} / ${l.corner.toFixed(2)}</td><td>${l.kp} · ${l.kd} · ${esc(l.verdict).toUpperCase()}</td></tr>`).join('');
+  } catch (e) {}
+}
+function renderSectionTune(a) {
+  if (!a) return;
+  for (const id of ['straight_kp', 'straight_kd', 'corner_kp', 'corner_kd']) {
+    const k = knobDef(id); if (k && a[id] != null) k.value = a[id];
+  }
+  syncBigKnobs();
+  const set = (name, kp, kd) => { $('section' + name + 'Gains').textContent = `KP ${fmt(kp, 2)} · KD ${fmt(kd, 2)}`; };
+  set('Straight', a.straight_kp, a.straight_kd); set('Corner', a.corner_kp, a.corner_kd);
+  const active = a.section;
+  for (const name of ['Straight', 'Corner']) {
+    const key = name.toLowerCase(), card = $('section' + name + 'Card'), badge = $('section' + name + 'State');
+    const isActive = (active === key || active === 'both') && a.state === 'running';
+    card.classList.toggle('active', isActive);
+    const result = (a.section_results || {})[key] || 'pending';
+    const labels = { passed: 'Passed tracking checks', failed: 'Failed', insufficient: 'Not enough data', retune: 'Run again', stopped: 'Stopped' };
+    const done = a.state === 'done' && (active === key || active === 'both');
+    const shown = done && a.result !== 'passed' ? a.result : result;
+    badge.textContent = isActive ? (result === 'passed' ? 'Passed · monitoring' : 'Collecting samples') : done ? (labels[shown] || 'Not verified') : 'Ready';
+    badge.className = 'badge ' + (isActive ? 'warn' : done && shown === 'passed' ? 'ok' : 'plain');
+  }
+  $('sectionSave').disabled = !(a.state === 'done' && active && a.result === 'passed');
+  $('sectionTuneNote').textContent = a.section ? (a.message || `Selected section: ${a.section}`) : 'Place the car first, then tune one section at a time.';
+}
+const strat = () => document.querySelector('input[name=strat]:checked').value;
+function stratUi() {
+  const s = strat(), need = { gains: 'speed it holds (default: current plan speed)', zn: 'speed it weaves at (0.80 recommended)', max_speed: 'first speed (default 0.55)' }[s];
+  $('atSpeedRow').hidden = !need; if (need) $('atSpeedNote').textContent = need;
+  if (s === 'zn' && !$('atSpeed').value) $('atSpeed').value = '0.80';
+}
+document.querySelectorAll('input[name=strat]').forEach(r => r.onchange = stratUi); stratUi();
+setInterval(pollTuning, 1500);
+$('atCeil').oninput = () => { const lim = knobVal('max_auto'); $('atCeilPwm').textContent = '≈ PWM ' + pwmOf(+$('atCeil').value) + (lim != null && lim < +$('atCeil').value ? ` · Max: Full auto (${lim}) caps it lower` : ''); };
+$('atCeil').oninput();
+twoStep($('atStart'), 'Start Auto-Tune', async () => {
+  const r = await api('/api/autotune', { action: 'start', strategy: strat(), ceiling: +$('atCeil').value, speed: $('atSpeedRow').hidden ? null : ($('atSpeed').value || null) });
+  toast(r.message); pollTuning(); });
+$('atStop').onclick = async () => { try { await api('/api/autotune', { action: 'stop' }); pollTuning(); } catch (e) { toast(e.message); } };
+$('atSave').onclick = async () => { try { await api('/api/autotune', { action: 'save_schedule' }); toast('Saved: speed profiles now use the car-verified gains'); pollTuning(); } catch (e) { toast(e.message); } };
+$('profRecompute').onclick = async () => { try { await api('/api/autotune', { action: 'recompute' }); toast('Recomputing the whole schedule (about a minute)'); } catch (e) { toast(e.message); } };
+$('atKeep').onclick = async () => { try { await api('/api/autotune', { action: 'keep' }); toast('Kept. Press Save Tuning to make it permanent.'); loadState(); } catch (e) { toast(e.message); } };
+function sectionAction(section, action) {
+  return async () => {
+    try {
+      const body = action === 'section_start'
+        ? { action, strategy: section, ceiling: knobVal('max_auto'), speed: knobVal(section === 'corner' ? 'speed_corner' : 'speed_straight') || currentSpeed() }
+        : { action, strategy: section };
+      const r = await api('/api/autotune', body);
+      toast(r.message || (action === 'section_reset' ? `${section} sample reset` : `${section} tuning started`)); pollTuning();
+    } catch (e) { toast(e.message); }
+  };
+}
+twoStep($('sectionStraightStart'), 'Tune straight', sectionAction('straight', 'section_start'));
+twoStep($('sectionCornerStart'), 'Tune corner', sectionAction('corner', 'section_start'));
+$('sectionStraightReset').onclick = sectionAction('straight', 'section_reset');
+$('sectionCornerReset').onclick = sectionAction('corner', 'section_reset');
+$('sectionFinish').onclick = async () => { try { await api('/api/autotune', { action: 'section_finish' }); pollTuning(); } catch (e) { toast(e.message); } };
+twoStep($('sectionBothStart'), 'Tune both automatically', async () => {
+  const r = await api('/api/autotune', { action: 'sections_start', ceiling: +$('atCeil').value, speed: currentSpeed() });
+  toast(r.message || 'Guided section tuning started'); pollTuning();
+});
+$('sectionSave').onclick = async () => { try { await api('/api/save', {}); toast('Saved straight and corner gains'); pollTuning(); } catch (e) { toast(e.message); } };
+
+/* ---------------- log ---------------- */
+let logSince = 0, logItems = [], logProblems = false;
+async function pollLog() { try { const items = await api('/api/log?since=' + logSince); if (items.length) { logItems.push(...items); logSince = items[items.length - 1].id; logItems = logItems.slice(-500); renderLog(); } } catch (e) {} }
+function renderLog() {
+  const box = $('log'), stick = box.scrollTop < 8;
+  const rows = logItems.filter(e => !logProblems || e.level !== 'info').slice().reverse();
+  box.innerHTML = rows.length ? rows.map(e => `<div class="logrow"><span class="tm">${esc(e.time)}</span><span><span class="badge ${e.level === 'info' ? 'info' : e.level}">${e.level === 'bad' ? 'Stop' : e.level === 'warn' ? 'Warn' : 'Info'}</span></span><span>${esc(e.text)}</span></div>`).join('')
+    : `<div class="logrow"><span></span><span></span><span class="note">${logProblems ? 'No problems logged.' : 'Nothing yet.'}</span></div>`;
+  if (stick) box.scrollTop = 0;
+}
+function logFilter(p) { logProblems = p; $('logAll').classList.toggle('on', !p); $('logProb').classList.toggle('on', p); renderLog(); }
+$('logAll').onclick = () => logFilter(false); $('logProb').onclick = () => logFilter(true);
+setInterval(pollLog, 1000);
+
+/* ---------------- modes and stops ---------------- */
+document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = async () => { try { await api('/api/mode', { mode: b.dataset.mode }); toast('Mode: ' + b.textContent); } catch (e) { toast(e.message); } });
+async function stopCar() { releasePad(); try { await api('/api/estop', {}); toast('Stopped. The program is still running: pick a mode to carry on.'); } catch (e) { toast('STOP failed: ' + e.message + '. Use the gamepad Y.'); } }
+$('btnStop').onclick = stopCar;
+function twoStep(btn, label, action) {
+  let armed = 0; const lbl = () => btn.querySelector('.danger') || btn;
+  btn.onclick = async () => {
+    if (Date.now() - armed > 5000) { armed = Date.now(); btn.classList.add('arm'); lbl().textContent = 'Click again: ' + label;
+      setTimeout(() => { btn.classList.remove('arm'); lbl().textContent = label; }, 5000); return; }
+    armed = 0; btn.classList.remove('arm'); lbl().textContent = label;
+    try { await action(); } catch (e) { toast(e.message); }
+  };
+}
+twoStep($('btnQuit'), 'Quit Program', async () => { await api('/api/off', {}); $('powerMenu').open = false; toast('Stopping and quitting. Restart drive_line.py to use it again.'); });
+twoStep($('btnPower'), 'Shut Down Pi', async () => { await api('/api/poweroff', {}); $('powerMenu').open = false; toast('The Pi is shutting down. Flip the car power switch once its light stops.'); });
+document.addEventListener('click', (e) => { if (!$('powerMenu').contains(e.target)) $('powerMenu').open = false; });
+addEventListener('keydown', (e) => { if (e.key === 'Escape') $('powerMenu').open = false; });
+
+/* ---------------- web joystick ---------------- */
+const pad = $('pad'), dot = $('padDot');
+let padHeld = false, padS = 0, padT = 0, padTimer = null, keys = {};
+const scale = () => parseFloat($('padScale').value);
+$('padScale').oninput = () => $('padScaleN').value = $('padScale').value;
+$('padScaleN').onchange = () => $('padScale').value = $('padScaleN').value;
+function sendDrive() { api('/api/drive', { steering: padS, throttle: padT * scale() }).catch(() => {}); }
+function holdPad() { if (!padHeld) { padHeld = true; pad.classList.add('held'); padTimer = setInterval(sendDrive, 100); } sendDrive(); }
+function releasePad() { if (padHeld) { padHeld = false; pad.classList.remove('held'); clearInterval(padTimer); api('/api/drive', { release: true }).catch(() => {}); } padS = padT = 0; dot.style.transform = ''; }
+function padMove(e) {
+  const r = pad.getBoundingClientRect(), R = r.width / 2;
+  let dx = (e.clientX - r.left - R) / R, dy = (e.clientY - r.top - R) / R; const m = Math.hypot(dx, dy); if (m > 1) { dx /= m; dy /= m; }
+  padS = +dx.toFixed(2); padT = +(-dy).toFixed(2); dot.style.transform = `translate(${dx * (R - 28)}px, ${dy * (R - 28)}px)`; holdPad();
+}
+pad.addEventListener('pointerdown', (e) => { pad.setPointerCapture(e.pointerId); padMove(e); });
+pad.addEventListener('pointermove', (e) => { if (padHeld) padMove(e); });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => pad.addEventListener(ev, releasePad));
+addEventListener('blur', releasePad);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releasePad(); });
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); stopCar(); return; }
+  if (!['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) return;
+  keys[e.code] = true; padT = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); padS = (keys.KeyD ? 0.8 : 0) - (keys.KeyA ? 0.8 : 0); holdPad();
+});
+addEventListener('keyup', (e) => { if (!(e.code in keys)) return; delete keys[e.code]; if (!Object.keys(keys).length) releasePad(); else { padT = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); padS = (keys.KeyD ? 0.8 : 0) - (keys.KeyA ? 0.8 : 0); } });
+
+/* ---------------- runs ---------------- */
+let runRows = [], runSum = null, runName = null, playT = null;
+async function loadRuns() {
+  try {
+    const runs = await api('/api/runs'); const box = $('runlist'); box.innerHTML = '';
+    if (!runs.length) { box.innerHTML = '<p class="note">No runs yet. Runs are recorded while the pilot drives.</p>'; return; }
+    for (const r of runs) {
+      const b = document.createElement('button'); b.className = 'runitem' + (r.name === runName ? ' on' : ''); b.dataset.name = r.name;
+      const bad = (r.events || []).filter(e => ['lost', 'single', 'stalled'].includes(e.kind)).length;
+      const d = r.name.replace(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3 $4:$5:$6');
+      b.innerHTML = `<span class="t">${esc(d)}</span><span class="s">${r.frames || 0} frames · ${r.duration_s ?? '?'} s · tracked ${r.tracked_pct ?? '?'}%${r.error ? ` · avg |error| ${r.error.mean_abs}` : ''}</span>
+        <span class="s">${Object.entries(r.modes || {}).map(([m, n]) => (modeName[m] || esc(m)) + ' ' + n).join(' · ')}</span>${bad ? `<span class="s"><span class="badge bad">${bad} problem${bad > 1 ? 's' : ''}</span></span>` : ''}`;
+      b.onclick = () => openRun(r.name); box.appendChild(b);
+    }
+    if (!runName) openRun(runs[0].name);
+  } catch (e) { toast('Runs: ' + e.message); }
+}
+$('btnReload').onclick = loadRuns;
+async function openRun(name) {
+  runName = name; document.querySelectorAll('.runitem').forEach(b => b.classList.toggle('on', b.dataset.name === name));
+  const j = await api('/api/runs/' + name); runRows = j.rows; runSum = j.summary;
+  $('runTitle').textContent = `${name} · ${runSum.frames} frames · ${runSum.duration_s} s · tracked ${runSum.tracked_pct}%`;
+  const es = runSum.error;
+  $('runErr').textContent = es ? `Tracking error while the pilot steered: average ${es.mean_abs}, RMS ${es.rms}, 95% of frames under ${es.p95_abs}, worst ${es.max_abs} (fraction of image width).` : 'No pilot-steered frames with the line found.';
+  $('runCsv').href = `/runs/${name}/log.csv`; $('runCsv').hidden = false;
+  const ev = $('events'); ev.innerHTML = '';
+  if (!runSum.events.length) ev.innerHTML = '<span class="note">No problems found in this run.</span>';
+  for (const e of runSum.events) { const b = document.createElement('button'); b.className = 'ev ' + e.kind; b.textContent = `#${e.from} ${e.text}`; b.onclick = () => showFrame(e.from); ev.appendChild(b); }
+  $('scrub').max = Math.max(0, runRows.length - 1); showFrame(0);
+}
+const num = (v) => v === '' || v == null ? null : parseFloat(v);
+function drawRun(cur) {
+  const [g, w, h] = prep($('chRun')); const n = runRows.length; if (!n) return;
+  const xs = runRows.map((_, i) => i / Math.max(1, n - 1));
+  for (let i = 0; i < n; i++) { const r = runRows[i]; const col = r.found === '0' ? css('--bad') : r.source === 'right' ? css('--warn') : null;
+    if (col) { g.fillStyle = col; g.globalAlpha = .16; g.fillRect(30 + xs[i] * (w - 30), 0, Math.max(1, (w - 30) / n), h - 16); g.globalAlpha = 1; } }
+  axes(g, w, h, -1, 1, [-1, -0.5, 0, 0.5, 1], 30);
+  line(g, xs, runRows.map(r => num(r.error) ?? (num(r.x_ratio) == null ? null : num(r.x_ratio) - 0.2)), css('--tape-fill'), -1, 1, w, h, 30);
+  line(g, xs, runRows.map(r => num(r.throttle)), css('--c-d'), -1, 1, w, h, 30);
+  line(g, xs, runRows.map(r => num(r.angle)), css('--ink'), -1, 1, w, h, 30, 2);
+  const x = 30 + (cur / Math.max(1, n - 1)) * (w - 30); g.strokeStyle = css('--target'); g.lineWidth = 2; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h - 16); g.stroke();
+}
+function showFrame(i) {
+  if (!runRows.length) return; i = Math.max(0, Math.min(runRows.length - 1, i | 0));
+  $('scrub').value = i; const r = runRows[i];
+  $('frameImg').src = `/runs/${runName}/${String(r.n).padStart(6, '0')}.jpg`;
+  $('frameNo').textContent = `frame ${i + 1} / ${runRows.length}`;
+  const t0 = num(runRows[0].t) || 0;
+  const rows = [['time', fmt((num(r.t) || 0) - t0, 2) + ' s'], ['mode', modeName[r.mode] || r.mode], ['status', r.status || (r.found === '1' ? 'TRACKING' : 'LOST')], ['line source', r.source], ['confidence', r.conf],
+    ['line x', r.x_ratio || '–'], ['error', r.error || '–'], ['P term', r.p || '–'], ['D term', r.d || '–'], ['steering', r.angle], ['throttle', r.throttle],
+    ['motion', r.motion || '–'], ['both lines', r.both === '1' ? 'yes' : r.both === '0' ? 'no' : '–'], ['crawl throttle', r.crawl_thr || '–'], ['one-line stop', r.single_stop === '1' ? 'YES' : '–']];
+  $('frameKv').innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v ?? '–')}</td></tr>`).join('');
+  drawRun(i);
+}
+$('scrub').oninput = () => showFrame(+$('scrub').value);
+$('btnPlay').onclick = () => {
+  if (playT) { clearInterval(playT); playT = null; $('btnPlay').textContent = 'Play'; return; }
+  $('btnPlay').textContent = 'Pause'; playT = setInterval(() => { const i = +$('scrub').value + 1; if (i >= runRows.length) { $('btnPlay').click(); return; } showFrame(i); }, 50);
+};
+addEventListener('resize', () => { drawLive(); if (runRows.length) drawRun(+$('scrub').value); drawSimMap(); drawSimTrack(); });
+
+/* ---------------- start ---------------- */
+function organizeWorkbench() {
+  const drive = $('view-drive'), tune = $('view-tune'), diagnosis = $('view-diagnose');
+  const mission = drive.querySelector('.mission');
+  mission.querySelector('h1').textContent = 'Drive & tune';
+  mission.querySelector('.mission-main p').textContent = 'Video, tuning and checks in one place. Gamepad sticks take over Auto.';
+  mission.querySelector('.mission-readout').hidden = true;
+  mission.style.gridTemplateColumns = '1fr';
+  $('missionSafe').hidden = true;
+  $('missionCheck').textContent = 'Check now';
+  mission.querySelector('a[href="#tune"]').remove();
+  mission.querySelector('.mission-actions').append($('btnSave'));
+  const reviewButton = document.createElement('button'); reviewButton.className = 'btn'; reviewButton.id = 'reviewStart'; reviewButton.textContent = 'Download & analyze recordings';
+  mission.querySelector('.mission-actions').append(reviewButton);
+  document.querySelector('[data-view="drive"]').textContent = 'Drive & tune';
+  document.querySelector('[data-view="tune"]').hidden = true;
+  const diagNav = document.querySelector('[data-view="diagnose"]'); diagNav.hidden = true;
+  // Keep the diagnosis count available in the unified screen.
+  mission.querySelector('.card-h').append($('diagCount'));
+  document.querySelector('[data-view="simulator"]').textContent = 'Simulator lab';
+
+  const grid = document.createElement('div'); grid.className = 'workbench';
+  const live = document.createElement('div'); live.className = 'workbench-live';
+  const controls = document.createElement('div'); controls.className = 'card workbench-controls';
+  grid.append(live, controls); mission.after(grid);
+  const hero = drive.querySelector('.hero');
+  live.append(hero.firstElementChild);
+  const camera = live.firstElementChild;
+  camera.append(hero.querySelector('.readouts'));
+  const liveFacts = document.createElement('dl'); liveFacts.className = 'facts';
+  for (const id of ['tSection', 'tSpeedTarget', 'tLim', 'tGains']) liveFacts.append($(id).parentElement);
+  camera.append(liveFacts);
+  $('topIssue').hidden = true;
+  const checkDetails = document.createElement('details'); checkDetails.className = 'more';
+  checkDetails.innerHTML = '<summary>All live checks & recommended fixes</summary>';
+  checkDetails.append(diagnosis.firstElementChild);
+
+  const sectionTune = drive.ownerDocument.querySelector('.section-tune');
+  controls.innerHTML = '<div class="card-h"><h2>Straight → curve → full lap</h2></div><p class="note">Start slow. Set each section’s speed and PD response, run its trial, then test both together. Settings apply live on the Pi. Changing speeds ends an active trial.</p>';
+  controls.querySelector('.card-h').append($('atState'));
+  controls.append(sectionTune);
+  const cardStraight = $('sectionStraightCard'), cardCorner = $('sectionCornerCard');
+  const moveKnob = (id, dest) => dest.append($('bk_' + id).closest('.bigknob'));
+  const makeKnob = (id, label, help, max, step) => {
+    const el = document.createElement('div'); el.className = 'bigknob';
+    el.innerHTML = `<label for="bk_${id}" id="lbl_${id}">${label}</label><input class="field" id="bkn_${id}" type="number" min="0" max="${max}" step="${step}" aria-label="${label} value"><input id="bk_${id}" type="range" min="0" max="${max}" step="${step}"><span class="help">${help}</span>`;
+    return el;
+  };
+  for (const [name, card] of [['straight', cardStraight], ['corner', cardCorner]]) {
+    card.querySelector('h4').textContent = name === 'straight' ? 'Straight' : 'Curve';
+    card.querySelector('.section-help').textContent = name === 'straight' ? 'Recover toward the line without weaving. Stops at a confirmed curve.' : 'Hold the curve at a lower speed, with corrections. Stops at a confirmed straight.';
+    const buttons = card.querySelector('.row');
+    moveKnob(name === 'straight' ? 'speed_straight' : 'speed_corner', card);
+    const presets = document.createElement('div'); presets.className = 'row';
+    for (const [label, fast] of [['Slow test', false], ['Faster +0.03', true]]) {
+      const b = document.createElement('button'); b.className = 'btn small'; b.textContent = label;
+      b.onclick = () => {
+        const id = name === 'straight' ? 'speed_straight' : 'speed_corner';
+        const limit = Math.min(knobVal('max_auto') ?? .6, knobVal('top_throttle') ?? .6);
+        const speed = Math.min(limit, fast ? (knobVal(id) || .55) + .03 : .55);
+        const values = { [id]: speed };
+        if (name === 'corner' && !(knobVal('speed_straight') > 0)) values.speed_straight = speed;
+        applyKnobs(values, `${name} speed ${speed.toFixed(2)} prepared`);
+      }; presets.append(b);
+    }
+    card.append(presets);
+    card.append(makeKnob(name + '_kp', 'Steering strength · KP', 'Lower if it weaves; raise if it lags without reaching the steering limit.', 10, .1));
+    card.append(makeKnob(name + '_kd', 'Damping · KD', 'Smooth the correction; reduce if steering chatters.', 2, .05));
+    card.append(buttons);
+  }
+  $('sectionCornerStart').textContent = 'Tune curve';
+  // Put essentials before optional model and diagnostic details.
+  const sectionGrid = cardStraight.parentElement;
+  for (const el of [...sectionTune.children]) {
+    if (el.tagName === 'H3' || el.tagName === 'P' || el.classList.contains('steps') || (el.classList.contains('section-grid') && el !== sectionGrid)) el.hidden = true;
+  }
+  sectionTune.prepend(sectionGrid);
+  const shared = document.createElement('details'); shared.className = 'more';
+  shared.innerHTML = '<summary>Speed limits & transition</summary>';
+  const limitKnob = makeKnob('max_auto', 'Full Auto speed ceiling', 'The overall motor limit also applies; see the effective speed limit beside the camera.', .8, .01);
+  shared.append(limitKnob);
+  for (const id of ['speed_transition', 'speed_ramp_down', 'speed_ramp_up']) moveKnob(id, shared);
+  controls.append(shared, $('atMsg'), $('saveNote'));
+  const reviewPanel = document.createElement('details'); reviewPanel.className = 'more'; reviewPanel.id = 'reviewPanel';
+  reviewPanel.innerHTML = '<summary>Recording analysis · download → replay → simulation → stress tests</summary><p class="note" id="reviewHint">Analysis runs on the Mac. Settings are never applied automatically.</p><div class="row"><label for="reviewHost">Pi IP</label><input class="field" id="reviewHost" placeholder="Enter current Pi IP" style="width:160px"><label><input type="checkbox" id="reviewDeep" checked> Include rendered camera & uncertainty tests</label><button class="btn" id="reviewCancel">Cancel analysis</button></div><progress id="reviewProgress" max="100" value="0" style="width:100%" aria-label="Recording analysis progress"></progress><p id="reviewStage" class="note">Ready</p><div id="reviewReport"></div><a class="btn" id="reviewDownload" hidden download="recording-review.json">Download report</a>';
+  controls.append(reviewPanel);
+  $('reviewStart').onclick = async () => {
+    reviewPanel.open = true;
+    $('reviewStart').disabled = true;
+    try { await api('/api/review', {action:'start', host:$('reviewHost').value, deep:$('reviewDeep').checked}); await pollReview(); }
+    catch (e) { $('reviewStage').textContent = e.message; $('reviewStart').disabled = false; }
+  };
+  $('reviewCancel').onclick = async () => { try { await api('/api/review', {action:'cancel'}); await pollReview(); } catch (e) { toast(e.message); } };
+  $('sectionSave').hidden = true; // One persistent Save Tuning action at the top.
+  controls.append($('atTable'));
+
+  const backup = drive.querySelector(':scope > .cols');
+  const padCard = $('pad').closest('.card');
+  padCard.querySelector('h2').textContent = 'Manual touchpad';
+  const padOptions = document.createElement('details'); padOptions.className = 'more';
+  padOptions.innerHTML = '<summary>Touchpad speed & keyboard help</summary>';
+  padOptions.append($('padScale').closest('.knob'), padCard.querySelector(':scope > p'));
+  padCard.append(padOptions); live.append(padCard, checkDetails);
+  const extras = document.createElement('details'); extras.className = 'workspace-extra';
+  extras.innerHTML = '<summary>Live charts & run log</summary>';
+  extras.append(hero, backup); drive.append(extras);
+  const advanced = document.createElement('details'); advanced.id = 'advancedTools'; advanced.className = 'workspace-extra';
+  advanced.innerHTML = '<summary>Advanced settings & simulated preview</summary>';
+  drive.append(advanced);
+  while (tune.firstElementChild) advanced.append(tune.firstElementChild);
+  while (diagnosis.firstElementChild) advanced.append(diagnosis.firstElementChild);
+  advanced.append($('bk_target_x_ratio').closest('.bigknob'), $('bk_lookahead_ratio').closest('.bigknob'));
+  drive.append(advanced);
+  advanced.addEventListener('toggle', () => { if (advanced.open) { renderTuneProfiles(); schedulePreview(); } });
+}
+let reviewReportUrl = null, lastReviewReport = null;
+async function pollReview() {
+  try {
+    const job = await api('/api/review');
+    $('reviewStart').disabled = !job.available || job.state === 'running';
+    $('reviewCancel').disabled = job.state !== 'running';
+    if (document.activeElement !== $('reviewHost') && !$('reviewHost').dataset.edited) $('reviewHost').value = job.default_host || '';
+    $('reviewHost').disabled = !!job.connected_console;
+    $('reviewHost').oninput = () => { $('reviewHost').dataset.edited = '1'; };
+    $('reviewHint').textContent = job.available ? 'Copies recordings without changing the Pi. Runs checks from cheapest to most expensive on the Mac. Suggestions need your review and a slow car trial.' : 'For one-screen car control and analysis, launch on the Mac: python3 -B pi/review_dashboard.py --pi YOUR_PI_IP. Then open http://localhost:8899.';
+    $('reviewProgress').value = job.progress || 0;
+    $('reviewStage').textContent = (job.stage || 'Ready') + (job.error ? ': ' + job.error : '');
+    if (job.state === 'running' || job.state === 'failed') $('reviewPanel').open = true;
+    const report = job.report;
+    if (!report) return;
+    $('reviewReport').innerHTML = `<p>${esc(report.summary || `Processing ${report.frames || 0} recorded frames…`)}</p>`
+      + (report.suggestions || []).map(s => `<p class="note">• ${esc(s)}</p>`).join('')
+      + '<table class="kv"><tr><th>Recorded run</th><th>Baseline tracked</th><th>Selected settings</th></tr>'
+      + (report.runs || []).map(r => `<tr><td>${esc(r.run)} · ${r.frames} frames · ${esc(r.split)}</td><td>${r.variants.baseline['tracked%'].toFixed(1)}%</td><td>${r.variants.selected_settings['tracked%'].toFixed(1)}%</td></tr>`).join('') + '</table>'
+      + ((report.simulations || []).length ? '<h3>Simulated comparisons</h3><table class="kv"><tr><th>Candidate</th><th>Model lap</th><th>Off track</th><th>Body clearance L/R</th></tr>' + report.simulations.map(r => `<tr><td>${esc(r.name)}</td><td>${r.metrics.lap_s == null ? 'No complete lap' : r.metrics.lap_s + ' s'}</td><td>${r.metrics.off_track}</td><td>${r.metrics.min_body_clear_left_cm ?? '–'} / ${r.metrics.min_body_clear_right_cm ?? '–'} cm</td></tr>`).join('') + '</table>' : '')
+      + ((report.robustness || []).length ? '<h3>Stress tests</h3><table class="kv"><tr><th>Test</th><th>Off track</th><th>Model error, p95</th><th>Body clearance L/R</th></tr>' + report.robustness.map(r => `<tr><td>${esc(r.test)}</td><td>${r.metrics.off_track}</td><td>${r.metrics.err_p95_cm} cm</td><td>${r.metrics.min_body_clear_left_cm ?? '–'} / ${r.metrics.min_body_clear_right_cm ?? '–'} cm</td></tr>`).join('') + '</table>' : '')
+      + (report.inferences || []).map(s => `<p class="note">${esc(s)}</p>`).join('')
+      + (report.limits || []).map(s => `<p class="note">${esc(s)}</p>`).join('');
+    if (job.state === 'done' && report !== lastReviewReport) {
+      if (reviewReportUrl) URL.revokeObjectURL(reviewReportUrl);
+      reviewReportUrl = URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
+      $('reviewDownload').href = reviewReportUrl; $('reviewDownload').hidden = false; lastReviewReport = report;
+    }
+  } catch (e) { if ($('reviewStage')) $('reviewStage').textContent = 'Analysis requires the Mac console served over http://localhost:8899 (not a file:// preview).'; }
+}
+(async () => {
+  organizeWorkbench();
+  pollReview(); setInterval(pollReview, 2000);
+  await pollStatus();
+  route(); connect(); startVideo(); pollLog(); pollTuning(); pollDiagnose();
+  loadState().then(() => { if (view() === 'tune') schedulePreview(); }).catch(e => toast('Could not load settings: ' + e.message));
+})();
+</script>
+</body>
+</html>

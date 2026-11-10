@@ -1,0 +1,241 @@
+"""Corner geometry: from the tracked edge in the image to "how hard to turn" and "how fast".
+
+The pure-PD controller only steers once the car has drifted off the line, so in a corner it
+always runs a little wide and, at speed, reacts too late. A corner is really a geometry
+problem:
+
+  steering angle   delta = atan(wheelbase / R)          (kinematic bicycle; independent of speed)
+  corner speed     v_max = sqrt(mu * g * R)             (tyre grip)
+  braking          v_now^2 = v_corner^2 + 2 * a_brake * (distance left - v_now * delay)
+
+This module turns the detector's inside-edge pixels into ground points (same camera model as
+the simulator: equidistant fisheye, mount height/tilt/forward offset), fits the edge's
+curvature, shifts it to the path the car actually rides, and answers those three formulas.
+
+Every physical constant here is a MODEL value (sim/profile.json, most still unmeasured: see
+sim/CALIBRATION.md). Numpy only, so it runs on the Pi.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+
+import numpy as np
+
+G = 9.81
+
+
+@dataclass
+class CarModel:
+    wheelbase_m: float = 0.1741          # Waveshare spec
+    steer_max_deg: float = 25.0          # wheel angle at steering command +/-1 (ASSUMED until measured)
+    camera_fov_deg: float = 160.0        # diagonal, equidistant fisheye (ASSUMED interpretation)
+    cam_height_m: float = 0.17           # ASSUMED
+    cam_pitch_deg: float = 8.0           # derived from the horizon in real frames
+    cam_fwd_m: float = 0.15              # camera ahead of the rear axle (ASSUMED)
+    cam_roll_deg: float = 0.0            # camera rotated about its viewing axis (+ = image turned clockwise)
+    lens_k1: float = 0.0                 # fisheye distortion beyond equidistant: theta = rho * (1 + k1 * rho^2)
+    cam_cx_px: float = 0.0               # optical centre offset from the image centre, px (+ = right)
+    image_w: int = 240
+    image_h: int = 192
+    grip_mu: float = 0.5                 # ASSUMED tyre-to-mat grip
+    brake_decel: float = 1.5             # m/s^2 with throttle released (ASSUMED)
+    delay_s: float = 0.08                # camera + processing + actuator, s (rough)
+    # speed per throttle command (steady state): PWM = 370 + 37 * cmd, table PWM -> m/s (ASSUMED)
+    speed_table: tuple = ((370, 0.0), (387, 0.0), (390, 0.35), (407, 1.8))
+    pwm_stop: float = 370.0
+    pwm_full: float = 407.0
+
+
+def project_pixels(u, v, W, H, fov_deg, pitch_deg, height_m, fwd_m, roll_deg=0.0, k1=0.0, cx_px=0.0):
+    """Image pixel(s) -> ground point(s) in the car frame (X forward of the rear axle, Y left +).
+    Lens: fisheye, theta = rho * (1 + k1 * rho^2) with rho = r / f; f puts the image corner at fov/2
+    (k1 = 0 is equidistant). The camera is tilted down by pitch and rotated by roll about its axis.
+    Shared by the car (GroundModel) and the simulator's camera so both use one projection."""
+    u, v = np.asarray(u, float), np.asarray(v, float)
+    half_diag = math.hypot(W / 2, H / 2)
+    th_max = math.radians(fov_deg / 2)
+    # f such that the corner pixel maps to fov/2 under this distortion: solve rho(1 + k1 rho^2) = th_max
+    rho = th_max
+    for _ in range(30):
+        g, dg = rho * (1 + k1 * rho * rho) - th_max, 1 + 3 * k1 * rho * rho
+        rho -= g / dg if abs(dg) > 1e-9 else 0.0
+    f = half_diag / max(rho, 1e-6)
+    dx, dy = u - (W / 2 + cx_px), v - H / 2
+    if roll_deg:
+        cr, sr = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
+        dx, dy = cr * dx + sr * dy, -sr * dx + cr * dy
+    r = np.hypot(dx, dy) / f
+    theta = r * (1 + k1 * r * r)
+    az = np.arctan2(dy, dx)
+    rx, ry, rz = np.sin(theta) * np.cos(az), np.sin(theta) * np.sin(az), np.cos(theta)
+    phi = math.radians(pitch_deg)
+    # camera axes in the car frame: x right -> -Y, y down, z forward (tilted down by pitch)
+    gz = -rx * 0.0 + ry * (-math.cos(phi)) + rz * (-math.sin(phi))
+    gxr = ry * (-math.sin(phi)) + rz * math.cos(phi)
+    gyr = -rx
+    down = (gz < -1e-6) & (theta < math.pi / 2 + 0.5)
+    t = np.where(down, height_m / np.maximum(-gz, 1e-9), np.nan)
+    gx = np.where(down, fwd_m + t * gxr, np.nan)
+    gy = np.where(down, t * gyr, np.nan)
+    return gx, gy
+
+
+class GroundModel:
+    """Pixel -> ground point (car frame: X forward of the rear axle, Y left +), metres."""
+
+    def __init__(self, m: CarModel):
+        self.m = m
+        u, v = np.meshgrid(np.arange(m.image_w) + 0.5, np.arange(m.image_h) + 0.5)
+        self.gx, self.gy = project_pixels(u, v, m.image_w, m.image_h, m.camera_fov_deg, m.cam_pitch_deg,
+                                          m.cam_height_m, m.cam_fwd_m, m.cam_roll_deg, m.lens_k1, m.cam_cx_px)
+
+    def project(self, pts_px: np.ndarray, img_w: int, img_h: int) -> np.ndarray:
+        """Image points (x, y) in an img_w x img_h image -> ground (X, Y); NaN rows dropped."""
+        if pts_px is None or len(pts_px) == 0:
+            return np.zeros((0, 2))
+        p = np.asarray(pts_px, float)
+        u = np.clip((p[:, 0] * self.m.image_w / img_w).astype(int), 0, self.m.image_w - 1)
+        v = np.clip((p[:, 1] * self.m.image_h / img_h).astype(int), 0, self.m.image_h - 1)
+        g = np.stack([self.gx[v, u], self.gy[v, u]], 1)
+        return g[np.isfinite(g).all(1)]
+
+    def expected_x_ratio(self, row_ratio: float, target_ratio: float, path_curvature: float) -> float | None:
+        """Where the tracked edge appears on this image row when the car rides the curve perfectly.
+
+        On a straight that's target_ratio. In a corner the edge bends across the image even when the
+        car is exactly on its line, so a PD loop aimed at target_ratio would add a second helping of
+        steering on top of the feedforward. Aim it here instead and PD only corrects real deviations.
+        Model: the car's path is a circle tangent to the car (curvature k, + left); the edge runs
+        parallel to it at the lateral offset it has when riding a straight at the target."""
+        m = self.m
+        r = min(m.image_h - 1, int(row_ratio * m.image_h))
+        u0 = int(np.clip(round(target_ratio * m.image_w - 0.5), 0, m.image_w - 1))
+        y0 = self.gy[r, u0]                      # edge's lateral offset when riding straight at the target
+        if not np.isfinite(y0) or abs(path_curvature) < 1e-3:
+            return target_ratio
+        cy = 1.0 / path_curvature                # circle centre (0, cy) relative to the rear axle
+        R_edge = abs(cy - y0)
+        gx, gy = self.gx[r], self.gy[r]
+        d = np.abs(np.hypot(gx, gy - cy) - R_edge)
+        ok = np.isfinite(d)
+        if not ok.any():
+            return None
+        # the crossing nearest the straight-ahead target position (the circle can cross the row twice)
+        cand = np.nonzero(ok & (d < 0.02))[0]
+        if not len(cand):
+            return None
+        u = cand[np.argmin(np.abs(cand - u0))]
+        return float((u + 0.5) / m.image_w)
+
+    def row_distance(self, row_ratio: float) -> float:
+        r = min(self.m.image_h - 1, int(row_ratio * self.m.image_h))
+        return float(self.gx[r, self.m.image_w // 2])
+
+
+@dataclass
+class Bend:
+    curvature: float          # 1/m of the PATH the car rides; + = bends left, - = bends right
+    edge_curvature: float     # 1/m of the tracked tape edge itself
+    lateral_m: float          # tape edge's lateral offset near the car (Y, left +)
+    near_m: float             # closest ground distance the fit covers
+    far_m: float              # farthest
+    n: int                    # points used
+    resid_m: float            # fit RMS residual
+
+    @property
+    def radius_m(self) -> float:
+        return math.inf if abs(self.curvature) < 1e-6 else 1.0 / abs(self.curvature)
+
+
+def fit_bend(ground: np.ndarray, max_dist=1.4, min_pts=5, min_span=0.2, straight_tol_m=0.006) -> Bend | None:
+    """Fit a circle to the edge's ground points (algebraic least squares: exact for arcs, and a
+    huge radius on straights), then move it to the parallel path the car rides.
+
+    Sign: + = the edge bends left (circle centre to the left of the direction of travel)."""
+    if ground is None or len(ground) < min_pts:
+        return None
+    g = ground[(ground[:, 0] > 0.05) & (ground[:, 0] < max_dist)]
+    if len(g) < min_pts or np.hypot(np.ptp(g[:, 0]), np.ptp(g[:, 1])) < min_span:
+        return None
+    X, Y = g[:, 0], g[:, 1]
+    i0 = int(np.argmin(X))
+    x0, lat = float(X[i0]), float(Y[i0])              # nearest point: the edge's lateral position near the car
+    # straight? the points sit within a few mm (RMS) of the chord -> curvature 0. A circle
+    # through near-collinear points is ill-conditioned, so don't ask it.
+    far = int(np.argmax(X))
+    cdx, cdy = X[far] - X[i0], Y[far] - Y[i0]
+    chord = math.hypot(cdx, cdy)
+    if chord < 1e-6:
+        return None
+    dev = np.abs((X - X[i0]) * cdy - (Y - Y[i0]) * cdx) / chord
+    line_resid = float(np.sqrt(np.mean(dev ** 2)))
+    if line_resid < straight_tol_m:
+        return Bend(0.0, 0.0, lat, x0, float(X.max()), int(len(g)), line_resid)
+    # circle  x^2 + y^2 + D x + E y + F = 0 (centred on the data for conditioning)
+    mx, my = X.mean(), Y.mean()
+    x, y = X - mx, Y - my
+    A = np.stack([x, y, np.ones_like(x)], 1)
+    sol, *_ = np.linalg.lstsq(A, -(x ** 2 + y ** 2), rcond=None)
+    D, E, F = sol
+    cx, cy = -D / 2, -E / 2
+    r2 = cx ** 2 + cy ** 2 - F
+    if r2 <= 1e-9:
+        return None
+    R = math.sqrt(r2)
+    resid = float(np.sqrt(np.mean((np.hypot(x - cx, y - cy) - R) ** 2)))
+    if resid > 0.6 * line_resid:          # a circle doesn't explain the points much better than a line: no real bend
+        return Bend(0.0, 0.0, lat, x0, float(X.max()), int(len(g)), line_resid)
+    # direction of travel along the edge at its near end (towards the far points)
+    tx, ty = cdx, cdy
+    side = np.sign(tx * (cy + my - Y[i0]) - ty * (cx + mx - X[i0]))   # cross product: centre left (+) or right (-)
+    k_edge = 0.0 if R > 50 else float(side / R)
+    # parallel path at signed distance (car at Y=0, edge at Y=lat): k' = k / (1 + k*lat)
+    den = 1.0 + k_edge * lat
+    k_path = k_edge / den if den > 0.2 else k_edge
+    return Bend(float(k_path), k_edge, lat, x0, float(X.max()), int(len(g)), resid)
+
+
+def steer_for_curvature(m: CarModel, curvature: float) -> float:
+    """Steering command (-1 left .. +1 right) whose wheel angle follows this path curvature."""
+    delta = math.degrees(math.atan(m.wheelbase_m * curvature))    # + = left
+    return float(np.clip(-delta / m.steer_max_deg, -1.0, 1.0))
+
+
+def min_radius(m: CarModel) -> float:
+    return m.wheelbase_m / math.tan(math.radians(m.steer_max_deg))
+
+
+def corner_speed(m: CarModel, curvature: float, margin: float = 0.8) -> float:
+    """Fastest speed (m/s) for this curvature: grip limit x margin."""
+    if abs(curvature) < 1e-4:
+        return math.inf
+    return margin * math.sqrt(m.grip_mu * G / abs(curvature))
+
+
+def speed_of_cmd(m: CarModel, cmd: float) -> float:
+    pwm = m.pwm_stop + max(0.0, cmd) * (m.pwm_full - m.pwm_stop)
+    xs, ys = zip(*m.speed_table)
+    return float(np.interp(pwm, xs, ys))
+
+
+def cmd_for_speed(m: CarModel, v: float) -> float:
+    """Smallest throttle command whose steady speed reaches v (inverse of the speed table)."""
+    xs, ys = zip(*m.speed_table)
+    if v >= ys[-1]:
+        return 1.0
+    i = next(k for k in range(1, len(ys)) if ys[k] >= v and ys[k] > ys[k - 1])
+    pwm = xs[i - 1] + (v - ys[i - 1]) / (ys[i] - ys[i - 1]) * (xs[i] - xs[i - 1])
+    return float(np.clip((pwm - m.pwm_stop) / (m.pwm_full - m.pwm_stop), 0.0, 1.0))
+
+
+def allowed_speed(m: CarModel, bend: Bend | None, v_now: float, margin: float = 0.8) -> float:
+    """Speed allowed NOW so the car can still brake down to the corner speed of the bend it sees
+    ahead (the curvature is measured from bend.near_m onwards)."""
+    if bend is None:
+        return math.inf
+    v_c = corner_speed(m, bend.curvature, margin)
+    if not math.isfinite(v_c):
+        return math.inf
+    room = max(0.0, bend.near_m - v_now * m.delay_s)
+    return math.sqrt(v_c ** 2 + 2 * m.brake_decel * room)

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PiRacer Simulator</title>
+<style>
+:root { --bg:#f6f4fa; --panel:#fff; --ink:#1d1a28; --muted:#686179; --rule:#e3deec; --tape:#d9480f; --mat:#e9e4f3;
+  --car:#6f5bb5; --ok:#1f8a4c; --warn:#b7791f; --bad:#c62828; --path:#1f8a4c; --mono:ui-monospace,Menlo,Consolas,monospace; }
+@media (prefers-color-scheme: dark) { :root { --bg:#13111c; --panel:#1c1a28; --ink:#ece8f6; --muted:#a59eba; --rule:#2e2a40;
+  --tape:#ff7a3d; --mat:#26223a; --car:#a996ee; --ok:#4cc38a; --warn:#f0b429; --bad:#ff5c5c; --path:#4cc38a; color-scheme:dark; } }
+* { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,sans-serif }
+.wrap { max-width:1500px; margin:0 auto; padding:10px 14px 30px; display:grid; gap:10px }
+.grid { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:10px }
+.card { background:var(--panel); border:1px solid var(--rule); border-radius:10px; padding:10px; display:grid; gap:8px; min-width:0; align-content:start }
+h1 { font-size:16px; margin:0 } h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 }
+canvas#world { width:100%; height:560px; background:var(--mat); border-radius:8px; display:block }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:6px }
+.tile { border:1px solid var(--rule); border-radius:8px; padding:5px 8px } .tile .k { font-size:11px; color:var(--muted) }
+.tile .v { font:600 15px var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap }
+.bad { color:var(--bad) } .warnc { color:var(--warn) } .okc { color:var(--ok) }
+.row { display:flex; flex-wrap:wrap; gap:8px; align-items:center }
+label.f { display:grid; grid-template-columns:150px 1fr 64px; gap:6px; align-items:center; font-size:13px }
+input[type=range] { width:100%; accent-color:var(--tape) } input[type=number] { width:64px; font-family:var(--mono) }
+button { border:1px solid var(--rule); background:var(--panel); color:var(--ink); border-radius:7px; padding:6px 10px; cursor:pointer }
+button.on { background:var(--car); color:#fff }
+table { border-collapse:collapse; width:100%; font-size:12px } td,th { padding:3px 5px; border-bottom:1px solid var(--rule); text-align:right; font-variant-numeric:tabular-nums }
+td:first-child,th:first-child { text-align:left } .scroll { overflow:auto; max-height:320px }
+.badge { font-size:10px; font-weight:700; padding:1px 6px; border-radius:99px; text-transform:uppercase }
+.verified { background:color-mix(in srgb,var(--ok) 20%,transparent); color:var(--ok) }
+.measured { background:color-mix(in srgb,var(--car) 22%,transparent); color:var(--car) }
+.assumed { background:color-mix(in srgb,var(--warn) 25%,transparent); color:var(--warn) }
+.note { font-size:12px; color:var(--muted) } img#cam { width:100%; border-radius:6px; image-rendering:pixelated; background:#000 }
+canvas#err { width:100%; height:110px; display:block }
+@media (max-width:1000px) { .grid { grid-template-columns:minmax(0,1fr) } canvas#world { height:420px } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row"><h1>PiRacer Pro simulator</h1><span class="note" id="banner"></span></div>
+  <div class="grid">
+    <div class="card">
+      <div class="row"><h2>Track (to scale)</h2><span class="note">orange = tape · purple = car footprint 25.5×14 cm, wheelbase 17.4 cm · green = where it goes in 1 s (red when sliding) · dashed = turning circle now · faint = tightest possible · cyan = lookahead row · ◎ target · ● seen edge</span></div>
+      <canvas id="world"></canvas>
+      <div class="tiles" id="tiles"></div>
+      <canvas id="err"></canvas>
+      <div class="note">error (orange) and steering command (purple) over the last 6 s</div>
+    </div>
+    <div class="card">
+      <h2>Controls</h2>
+      <div class="row"><button id="run">Pause</button><button id="reset">Reset car</button>
+        <span class="note">Speed-up</span><button data-sp="1" class="on">1×</button><button data-sp="2">2×</button><button data-sp="4">4×</button></div>
+      <div class="row"><span class="note">Driver</span><button data-mode="auto" class="on">Pilot (Full auto)</button><button data-mode="manual">Manual (W/A/S/D)</button></div>
+      <label class="f">Throttle command<input type="range" id="throttle" min="0.45" max="1" step="0.01"><input type="number" id="throttleN" step="0.01"></label>
+      <label class="f">KP<input type="range" id="kp" min="0.5" max="10" step="0.1"><input type="number" id="kpN" step="0.1"></label>
+      <label class="f">KD<input type="range" id="kd" min="0" max="2" step="0.05"><input type="number" id="kdN" step="0.05"></label>
+      <label class="f">Target (image width)<input type="range" id="target" min="0.05" max="0.5" step="0.01"><input type="number" id="targetN" step="0.01"></label>
+      <label class="f">Lookahead row<input type="range" id="row" min="0.45" max="0.9" step="0.01"><input type="number" id="rowN" step="0.01"></label>
+      <label class="f">Camera FPS<input type="range" id="fps" min="5" max="60" step="1"><input type="number" id="fpsN" step="1"></label>
+      <label class="f">Processing delay (s)<input type="range" id="latency" min="0" max="0.15" step="0.005"><input type="number" id="latencyN" step="0.005"></label>
+      <label class="f">Grip μ (assumed)<input type="range" id="mu" min="0.2" max="1.0" step="0.05"><input type="number" id="muN" step="0.05"></label>
+      <div class="row"><span class="note">Model parts</span><button data-ext="slip">tyre slip</button><button data-ext="servo">servo</button><button data-ext="accel">accel/brake</button><button data-ext="delay">actuator delay</button><button id="vision">vision: geometric</button></div>
+      <h2>Corners at the current speed</h2>
+      <table id="feas"></table>
+      <h2>Simulated camera</h2>
+      <img id="cam" alt="Synthetic camera view with the lookahead row, target and detected edge">
+      <h2>Sweeps</h2>
+      <div class="row"><button id="swS">Speed sweep</button><button id="swG">KP × KD at this throttle</button><span class="note" id="swState"></span></div>
+      <div class="scroll"><table id="sweep"></table></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Parameters <span class="note">verified = manufacturer · measured = this car · assumed = placeholder until measured (sim/CALIBRATION.md)</span></h2>
+    <div class="scroll"><table id="params"></table></div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id), css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const post = (p, b) => fetch(p, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(b) }).then(r => r.json());
+let track = null, st = null, view = null;
+async function loadStatic() {
+  track = await (await fetch('/api/track')).json();
+  const ps = await (await fetch('/api/params')).json();
+  const n = ps.filter(p => p.status === 'assumed').length;
+  $('banner').innerHTML = `<span class="badge assumed">${n} assumed values</span> results are for this model, not yet the measured car`;
+  $('params').innerHTML = '<tr><th>parameter</th><th>value</th><th>status</th><th style="text-align:left">source</th></tr>' + ps.map(p =>
+    `<tr><td>${p.name}</td><td>${typeof p.value === 'string' ? p.value : JSON.stringify(p.value)} ${p.unit || ''}${p.range ? `<br><span class="note">range ${JSON.stringify(p.range)}</span>` : ''}</td><td><span class="badge ${p.status}">${p.status}</span></td><td style="text-align:left" class="note">${p.source}</td></tr>`).join('');
+  const all = track.left.concat(track.right);
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  view = { x0: Math.min(...xs) - .35, x1: Math.max(...xs) + .35, y0: Math.min(...ys) - .35, y1: Math.max(...ys) + .35 };
+}
+function bindNum(id, key, fromState) {
+  const r = $(id), n = $(id + 'N'); let t;
+  const send = v => { clearTimeout(t); t = setTimeout(() => post('/api/settings', { [key]: +v }), 150); };
+  r.oninput = () => { n.value = r.value; send(r.value); }; n.onchange = () => { r.value = n.value; send(n.value); };
+  return v => { if (document.activeElement !== r && document.activeElement !== n && v != null) { r.value = v; n.value = v; } };
+}
+const setters = { throttle: bindNum('throttle', 'throttle'), kp: bindNum('kp', 'kp'), kd: bindNum('kd', 'kd'), target: bindNum('target', 'target'),
+  row: bindNum('row', 'row'), fps: bindNum('fps', 'fps'), latency: bindNum('latency', 'latency'), mu: bindNum('mu', 'mu') };
+$('run').onclick = () => post('/api/settings', { running: !st.settings.running });
+$('reset').onclick = () => post('/api/settings', { reset: true });
+document.querySelectorAll('[data-sp]').forEach(b => b.onclick = () => post('/api/settings', { speedup: +b.dataset.sp }));
+document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => post('/api/settings', { mode: b.dataset.mode }));
+document.querySelectorAll('[data-ext]').forEach(b => b.onclick = () => post('/api/settings', { [b.dataset.ext]: !st.settings[b.dataset.ext] }));
+$('vision').onclick = () => post('/api/settings', { vision: st.settings.vision === 'geometric' ? 'rendered' : 'geometric' });
+$('swS').onclick = () => post('/api/sweep', { kind: 'speeds' }); $('swG').onclick = () => post('/api/sweep', { kind: 'gains' });
+const keys = {}; setInterval(() => { if (st && st.settings.mode === 'manual') post('/api/manual', { steer: (keys.KeyD ? .8 : 0) - (keys.KeyA ? .8 : 0), thr: (keys.KeyW ? +$('throttle').value : 0) - (keys.KeyS ? .3 : 0) }); }, 100);
+addEventListener('keydown', e => { if (e.target.tagName !== 'INPUT') keys[e.code] = true; }); addEventListener('keyup', e => delete keys[e.code]);
+
+function W(c, p) { const r = c.getBoundingClientRect(), s = Math.min(r.width / (view.x1 - view.x0), r.height / (view.y1 - view.y0));
+  return [(p[0] - view.x0) * s + (r.width - (view.x1 - view.x0) * s) / 2, r.height - ((p[1] - view.y0) * s + (r.height - (view.y1 - view.y0) * s) / 2), s]; }
+function draw() {
+  const c = $('world'), r = c.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+  c.width = r.width * dpr; c.height = r.height * dpr; const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (!track || !st) return; const sc = W(c, [0, 0])[2];
+  for (const line of [track.left, track.right]) { g.strokeStyle = css('--tape'); g.lineWidth = Math.max(1, track.tape_w * sc); g.beginPath();
+    line.forEach((p, i) => { const [x, y] = W(c, p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath(); g.stroke(); }
+  const [cx, cy] = W(c, st.pose), yaw = st.pose[2];
+  // turning circles (now, and tightest possible), centred on the instantaneous centre of rotation
+  const icr = R => [st.pose[0] - Math.sin(yaw) * -R, st.pose[1] + Math.cos(yaw) * -R];
+  if (st.radius_actual) { const R = st.radius_actual, [ix, iy] = W(c, icr(R)); g.setLineDash([5, 5]); g.strokeStyle = css('--muted'); g.lineWidth = 1;
+    g.beginPath(); g.arc(ix, iy, Math.abs(R) * sc, 0, 7); g.stroke(); g.setLineDash([]); }
+  for (const s of [-1, 1]) { const R = s * st.radius_min, [ix, iy] = W(c, icr(R)); g.strokeStyle = css('--rule'); g.lineWidth = 1; g.beginPath(); g.arc(ix, iy, st.radius_min * sc, 0, 7); g.stroke(); }
+  // lookahead row on the ground
+  g.strokeStyle = '#21b8c9'; g.lineWidth = 1.5; g.beginPath(); st.row_pts.forEach((p, i) => { const [x, y] = W(c, p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  // projected path
+  g.strokeStyle = st.slipping ? css('--bad') : css('--path'); g.lineWidth = 2.5; g.beginPath(); st.path.forEach((p, i) => { const [x, y] = W(c, p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
+  // footprint + wheels (front wheels at the actual steering angle; Ackermann inner/outer)
+  g.fillStyle = st.slipping ? css('--bad') : css('--car'); g.globalAlpha = .85; g.beginPath(); st.footprint.forEach((p, i) => { const [x, y] = W(c, p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath(); g.fill(); g.globalAlpha = 1;
+  const L = st.wheelbase, tw = st.track_w, d = st.delta;
+  const wheel = (fx, fy, ang) => { const wx = st.pose[0] + fx * Math.cos(yaw) - fy * Math.sin(yaw), wy = st.pose[1] + fx * Math.sin(yaw) + fy * Math.cos(yaw);
+    const [x, y] = W(c, [wx, wy]); g.save(); g.translate(x, y); g.rotate(-(yaw - ang)); g.fillStyle = '#111'; g.fillRect(-.03 * sc, -.012 * sc, .06 * sc, .024 * sc); g.restore(); };
+  const Rr = Math.abs(d) > 1e-4 ? L / Math.tan(Math.abs(d)) : 1e9, sgn = Math.sign(d);
+  const din = Math.atan(L / Math.max(Rr - tw / 2, 1e-3)) * sgn, dout = Math.atan(L / (Rr + tw / 2)) * sgn;
+  wheel(0, tw / 2, 0); wheel(0, -tw / 2, 0);
+  wheel(L, tw / 2, sgn > 0 ? dout : din); wheel(L, -tw / 2, sgn > 0 ? din : dout);
+  if (st.target_pt) { const [x, y] = W(c, st.target_pt); g.strokeStyle = '#21b8c9'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, 6, 0, 7); g.stroke(); }
+  if (st.seen_pt) { const [x, y] = W(c, st.seen_pt); g.fillStyle = css('--ok'); g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill(); }
+}
+function drawErr() {
+  const c = $('err'), r = c.getBoundingClientRect(), dpr = devicePixelRatio || 1; c.width = r.width * dpr; c.height = r.height * dpr;
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); if (!st || !st.err_hist.length) return;
+  const h = st.err_hist, t1 = h[h.length - 1][0], X = t => (t - (t1 - 6)) / 6 * r.width, Y = v => r.height / 2 - v * r.height / 2;
+  g.strokeStyle = css('--rule'); g.beginPath(); g.moveTo(0, r.height / 2); g.lineTo(r.width, r.height / 2); g.stroke();
+  for (const [i, col] of [[1, css('--tape')], [2, css('--car')]]) { g.strokeStyle = col; g.lineWidth = 1.6; g.beginPath(); h.forEach((p, k) => k ? g.lineTo(X(p[0]), Y(p[i])) : g.moveTo(X(p[0]), Y(p[i]))); g.stroke(); }
+}
+function tiles() {
+  const m = st.metrics, slip = st.slipping, lat = st.a_lat / Math.max(st.a_lat_max, 1e-6);
+  const T = [['speed', `${st.v.toFixed(2)} m/s`], ['yaw rate', `${st.yaw_rate}°/s`],
+    ['steer cmd → PWM → angle', `${st.steer_cmd.toFixed(2)} → ${st.steer_pwm} → ${st.delta_deg}°`],
+    ['throttle cmd → PWM', `${st.thr_cmd.toFixed(2)} → ${st.thr_pwm}`],
+    ['turn radius now / tightest', `${st.radius_actual ? Math.abs(st.radius_actual).toFixed(2) : '∞'} / ${st.radius_min.toFixed(2)} m`],
+    ['sideways grip used', `<span class="${slip ? 'bad' : lat > .8 ? 'warnc' : 'okc'}">${Math.round(100 * lat)}%${slip ? ' SLIDING' : ''}</span>`],
+    ['left stripe distance', `${st.offset_left_cm} cm (target ${st.ride_cm})`],
+    ['chassis clearance · left / right', `${m.min_body_clear_left_cm ?? '–'} / ${m.min_body_clear_right_cm ?? '–'} cm`],
+    ['line x / target', `${st.x_ratio ?? '–'} / ${st.target_ratio}`],
+    ['lookahead', `${st.look_m} m ahead`], ['camera / delay', `${st.fps} fps · ${Math.round(st.latency * 1000)} ms`],
+    ['laps · last', `${m.laps} · ${m.lap_s ?? '–'} s`], ['off track', `<span class="${m.off_track ? 'bad' : 'okc'}">${m.off_track}</span>`],
+    ['error mean / p95', `${m.err_mean_cm} / ${m.err_p95_cm} cm`], ['sliding / steer pinned', `${m.slip_pct}% / ${m.steer_sat_pct}%`]];
+  $('tiles').innerHTML = T.map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  $('feas').innerHTML = st.feas.length ? '<tr><th>corner</th><th>path R</th><th>tightest</th><th>steer needed</th><th>max speed</th><th>verdict</th></tr>' + st.feas.map(f =>
+    `<tr><td>${f.direction} @${f.s0} m</td><td>${f.radius_path_m}</td><td>${f.min_radius_m}</td><td>${f.steer_needed_deg}° of ${f.steer_available_deg}°</td><td>${f.v_max_mps} m/s</td><td class="${f.verdict.startsWith('ok') ? 'okc' : 'bad'}">${f.verdict}</td></tr>`).join('') : '<tr><td class="note">Car stopped.</td></tr>';
+  const s = st.settings; $('run').textContent = s.running ? 'Pause' : 'Run';
+  document.querySelectorAll('[data-sp]').forEach(b => b.classList.toggle('on', +b.dataset.sp === s.speedup));
+  document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === s.mode));
+  document.querySelectorAll('[data-ext]').forEach(b => b.classList.toggle('on', !!s[b.dataset.ext]));
+  $('vision').textContent = 'vision: ' + s.vision + (s.vision === 'rendered' ? ' (real detector)' : '');
+  setters.throttle(s.throttle); setters.kp(st.kp); setters.kd(st.kd); setters.target(st.target_ratio); setters.row(st.row_ratio);
+  setters.fps(st.fps); setters.latency(st.latency); setters.mu(st.mu);
+  const sw = st.sweep; $('swState').textContent = sw.state === 'running' ? 'running…' : sw.state === 'done' ? 'done' : '';
+  if (sw.rows && sw.rows.length) { const cols = Object.keys(sw.rows[0]).filter(k => !['seconds', 'best_lap_s'].includes(k));
+    $('sweep').innerHTML = '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>' + sw.rows.map(r => '<tr>' + cols.map(c => `<td class="${c === 'off_track' && r[c] ? 'bad' : ''}">${r[c] ?? ''}</td>`).join('') + '</tr>').join(''); }
+}
+async function loop() { try { st = await (await fetch('/api/state')).json(); draw(); drawErr(); tiles(); } catch (e) {} setTimeout(loop, 60); }
+setInterval(() => { $('cam').src = '/camera.jpg?t=' + Date.now(); }, 250);
+loadStatic().then(loop);
+</script>
+</body>
+</html>

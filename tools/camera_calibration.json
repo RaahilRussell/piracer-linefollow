@@ -1,0 +1,41 @@
+{
+  "camera_fov_deg": 159.065,
+  "cam_pitch_deg": 15.168,
+  "cam_roll_deg": -3.226,
+  "lens_k1": -0.076,
+  "cam_cx_px": -14.6,
+  "cam_height_m": 0.17,
+  "before": [
+    {
+      "set": "fit",
+      "frames": 144,
+      "parallel_cv_median": 0.053,
+      "width_cv_across_frames": 0.173,
+      "lane_width_m_at_assumed_height": 0.381
+    },
+    {
+      "set": "held out",
+      "frames": 70,
+      "parallel_cv_median": 0.055,
+      "width_cv_across_frames": 0.244,
+      "lane_width_m_at_assumed_height": 0.38
+    }
+  ],
+  "after": [
+    {
+      "set": "fit",
+      "frames": 144,
+      "parallel_cv_median": 0.042,
+      "width_cv_across_frames": 0.15,
+      "lane_width_m_at_assumed_height": 0.366
+    },
+    {
+      "set": "held out",
+      "frames": 71,
+      "parallel_cv_median": 0.062,
+      "width_cv_across_frames": 0.223,
+      "lane_width_m_at_assumed_height": 0.362
+    }
+  ],
+  "frames": 215
+}
