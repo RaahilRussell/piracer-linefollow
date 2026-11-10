@@ -44,6 +44,7 @@ _EXTRAS = {"RESET_AFTER_GAP_S": 0.3, "SHOW_OVERLAY": True, "TOP_THROTTLE": 0.35,
            "SPEED_RAMP_DOWN": 1.0, "SPEED_RAMP_UP": 0.4,
            "AUTOTUNE_START": 0.55, "AUTOTUNE_STEP": 0.03, "AUTOTUNE_WINDOW_S": 10.0, "TUNE_RACE_FIRST": True,
            "RACE_SPEED_STRAIGHT": None, "RACE_SPEED_TRANSITION": None, "RACE_SPEED_CORNER": None,
+           "THROTTLE_FORWARD_PWM": None, "RACE_FORWARD_PWM": None, "SAFE_FORWARD_PWM": None,
            "SAFE_SPEED_STRAIGHT": None, "SAFE_SPEED_TRANSITION": None, "SAFE_SPEED_CORNER": None,
            "TRACK_LENGTH_M": 4.98, "TRACK_CURVE_SHARE": 0.71,
            # car model for corner geometry (linetrack/geometry.py); None = the model defaults
@@ -61,6 +62,8 @@ def car_model(extras: dict | None = None) -> CarModel:
                       ("BRAKE_DECEL", "brake_decel"), ("CONTROL_DELAY_S", "delay_s")):
         if e.get(key) is not None:
             setattr(m, attr, float(e[key]))
+    if e.get("THROTTLE_FORWARD_PWM") is not None:
+        m.pwm_full = float(e["THROTTLE_FORWARD_PWM"])
     if e.get("SPEED_TABLE"):
         m.speed_table = tuple(tuple(r) for r in e["SPEED_TABLE"])
     return m

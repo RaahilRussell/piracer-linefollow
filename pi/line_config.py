@@ -76,7 +76,8 @@ CAM_FWD_M = 0.15
 GRIP_MU = 0.5
 BRAKE_DECEL = 1.5
 CONTROL_DELAY_S = 0.08
-SPEED_TABLE = [[370, 0.0], [387, 0.0], [390, 0.35], [407, 1.8]]
+SPEED_TABLE = [[370, 0.0], [387, 0.0], [390, 0.35], [407, 1.8], [460, 3.5]]   # 460: ASSUMED (only lookahead + lap estimate use it).
+                           # Check Nov 10: real laps average ~1.4 m/s at mean PWM ~402; the table gives 1.37.
 
 # --- Pilot speed in 'local' mode -----------------------------------------------
 # AUTO_CRAWL = True: the pilot finds the slowest throttle that keeps the car
@@ -121,22 +122,25 @@ SINGLE_LINE_STOP_S = 2.5
 SPEED_STRAIGHT = 0.75
 SPEED_TRANSITION = 0.75
 SPEED_CORNER = 0.70
-# RACE VALUES: REAL, Nov 10 evening, camera 0.15 m / 8 deg, 10-lap runs on the race mat:
-#   1.00 / 0.93 / 0.86: laps 3.54-3.77 s (mean 3.68), 0 line losses, right-line backup 2% of frames.
-#   1.00 / 0.94 / 0.88: mean 3.59 s but 2 brief line losses, backup 11%: the edge.
-#   1.00 / 0.95 / 0.90 (old Race): mean ~3.7 s incl. one 5.2 s lap, 4 laps with line losses, full lock with the
-#   inside line sliding out of view: the car physically can't turn tighter at that speed, so it runs wide.
-# The dashboard's "Race" preset.
+# RACE VALUES: REAL, Nov 10 evening, camera 0.15 m / 8 deg. Throttle is relative to RACE_FORWARD_PWM.
+#   PWM 420, 1.00 / 0.69 / 0.64, speed-up 1.0/s: 11 laps 3.42-3.70 s (mean 3.59), 1 brief line loss. Same battery
+#   session at PWM 407, 1.00 / 0.93 / 0.86: mean 3.77 s. Curve 0.64 at 420 = PWM 402 = curve 0.86 at 407: the curve
+#   PWM stays where it ran clean; only straights get faster.
+#   PWM 435 (same curve PWM): mean 3.59 s, more right-line backup and line losses: it arrives at curves too fast.
+#   At PWM 407, curve 0.88+ (PWM 403+) runs wide at full lock: curve speed is the real limit.
+# The dashboard's "Race" preset (it also sets the forward PWM; every other preset sets 407).
+RACE_FORWARD_PWM = 420
 RACE_SPEED_STRAIGHT = 1.00
-RACE_SPEED_TRANSITION = 0.93
-RACE_SPEED_CORNER = 0.86
+RACE_SPEED_TRANSITION = 0.69
+RACE_SPEED_CORNER = 0.64
 # SAFE RACE: 0.92 / 0.86. REAL Nov 10 evening: 10 laps 3.67-3.81 s, 0 line losses. The "Safe race" preset.
 SAFE_SPEED_STRAIGHT = 0.92
 SAFE_SPEED_TRANSITION = 0.89
 SAFE_SPEED_CORNER = 0.86
+SAFE_FORWARD_PWM = 407     # the speeds above were driven at PWM 407
 TUNE_RACE_FIRST = False    # False: "Start lap tuner" climbs from the speeds on the car. True: jump to the race values first.
 SPEED_RAMP_DOWN = 2.0
-SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend
+SPEED_RAMP_UP = 1.0      # throttle units / s when exiting a bend. Nov 10: 0.4 never reached straight speed on the 0.7 m straights
 
 # --- Auto-tuner (dashboard "Auto-tune": start slow, fix gains, step speed up) ------
 AUTOTUNE_START = 0.70      # used only by the classic strategies; the lap tuner starts from the speed plan above
@@ -150,6 +154,13 @@ TRACK_CURVE_SHARE = 0.71   # share of that length that is curve
 # --- Throttle (used in 'local' mode only if AUTO_CRAWL = False and the speed plan is off) ---
 LINE_THROTTLE = 0.35       # pilot crawl (~PWM 383). 0.20 (~377) did not move the car from a stop.
 MAX_THROTTLE = 1.00        # hard cap for any pilot throttle (fixed or auto-crawl)
+
+# --- Motor PWM at full forward throttle ----------------------------------------
+# Throttle 1.0 is sent to the ESC as this PWM; 0 is THROTTLE_STOPPED_PWM (370) from ~/mycar/myconfig.py.
+# ~/mycar's own value is 407 (its comment: "was 500"). We never write ~/mycar: drive_line.py sets this on the
+# throttle part after donkeycar builds it, and the dashboard slider changes it live (hard limit 460).
+# Raising it makes EVERY throttle value faster (manual stick included): re-tune the speeds with it.
+THROTTLE_FORWARD_PWM = 407
 
 # --- Top speed for EVERY mode (gamepad stick included) -----------------------
 # Final forward throttle sent to the motor is clipped to this (1.0 = the car's

@@ -423,7 +423,7 @@ async function api(path, body) {
 
 /* ---------- settings groups ---------- */
 const GROUPS = {
-  gSpeed: [['speed_straight', 'Straight throttle'], ['speed_corner', 'Curve throttle'], ['speed_transition', 'Entering a curve'],
+  gSpeed: [['forward_pwm', 'Motor PWM at full throttle'], ['speed_straight', 'Straight throttle'], ['speed_corner', 'Curve throttle'], ['speed_transition', 'Entering a curve'],
            ['speed_ramp_down', 'Braking rate /s'], ['speed_ramp_up', 'Speed-up rate /s'], ['conf_slow_below', 'Slow when detection below']],
   gSteer: [['straight_kp', 'Straight KP'], ['straight_kd', 'Straight KD'], ['corner_kp', 'Curve KP'], ['corner_kd', 'Curve KD'],
            ['kp', 'Shared KP'], ['kd', 'Shared KD'],

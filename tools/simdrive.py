@@ -37,8 +37,8 @@ VARIATIONS = {
     "grip 0.70": {"mu_lat": 0.70},
     "delay +40 ms": {"actuator_delay_s": 0.06},
     "slow camera pipe": {"processing_s": 0.051},
-    "speed -15%": {"speed_table": [[370, 0.0], [387, 0.0], [390, 0.30], [407, 1.53]]},
-    "speed +15%": {"speed_table": [[370, 0.0], [387, 0.0], [390, 0.40], [407, 2.07]]},
+    "speed -15%": {"speed_table": [[370, 0.0], [387, 0.0], [390, 0.30], [407, 1.53], [460, 2.98]]},
+    "speed +15%": {"speed_table": [[370, 0.0], [387, 0.0], [390, 0.40], [407, 2.07], [460, 4.03]]},
     "slow servo": {"servo_rate_dps": 150.0, "servo_tau_s": 0.08},
     "camera pitch 6": {"cam_pitch_deg": 6.0},
     "camera pitch 10": {"cam_pitch_deg": 10.0},
@@ -53,13 +53,15 @@ def build(setup=None, straight=None, corner=None):
     setup = setup or {}
     cfg, ex = load_line_config(line_config)
     for k, v in setup.items():
-        if k not in ("pilot", "plan"):
+        if k not in ("pilot", "plan", "forward_pwm"):
             if not hasattr(cfg, k):
                 raise KeyError(f"unknown setting '{k}'")
             setattr(cfg, k, v)
     cfg.max_throttle = 1.0
     extras = {"coast_s": ex["LOST_COAST_S"], "slow_s": ex["LOST_SLOW_S"], **setup.get("pilot", {})}
     model = car_model(ex)
+    if setup.get("forward_pwm") is not None:        # PWM at throttle 1.0 (the simulated ESC gets the same in drive())
+        model.pwm_full = float(setup["forward_pwm"])
     pilot = LineFollowerPilot(cfg, single_line_stop_s=0.0, model=model, **extras)
     st = ex["SPEED_STRAIGHT"] if straight is None else straight
     co = ex["SPEED_CORNER"] if corner is None else corner
@@ -84,6 +86,7 @@ def drive(setup=None, straight=None, corner=None, seconds=30.0, seed=0, prof=Non
     if vary:
         prof = prof.with_values(**vary)
     cfg, pilot, det = build(setup, straight, corner)
+    prof = prof.with_values(thr_pwm_forward=pilot.model.pwm_full)   # the car's forward PWM drives the simulated ESC
     w = World(prof, vision="rendered", seed=seed, target_ratio=cfg.target_x_ratio, row_ratio=cfg.lookahead_ratio,
               inside_tolerance_m=inside_tolerance_m)
     pilot.clock = det.clock = lambda: w.t

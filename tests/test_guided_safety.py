@@ -577,6 +577,22 @@ class PresetsAndPage(unittest.TestCase):
         hub.attach_autotuner(AutoTuner(pilot))
         return hub, line_config, webui
 
+    def test_forward_pwm_slider_drives_the_throttle_part_and_the_model(self):
+        hub, lc, webui = self.hub()
+
+        class FakeThrottle:
+            max_pulse, zero_pulse, min_pulse = 407, 370, 300
+        part = FakeThrottle()
+        hub.attach_throttle(part)
+        self.assertEqual(part.max_pulse, lc.THROTTLE_FORWARD_PWM)       # line_config value applied at start
+        hub.apply({"forward_pwm": 425})
+        self.assertEqual((part.max_pulse, hub.pilot.model.pwm_full), (425, 425.0))
+        hub.apply({"forward_pwm": 999})                                   # hard limit
+        self.assertEqual(part.max_pulse, 460)
+        self.assertEqual((part.zero_pulse, part.min_pulse), (370, 300))   # stop and reverse never touched
+        hub.apply_preset("slow")                                          # slow speeds were driven at 407
+        self.assertEqual(part.max_pulse, 407)
+
     def test_presets_only_use_real_knobs_and_race_is_line_config(self):
         hub, lc, webui = self.hub()
         presets = {p["id"]: p for p in hub.presets()}
@@ -594,8 +610,10 @@ class PresetsAndPage(unittest.TestCase):
         safe = presets["safe"]["values"]
         self.assertEqual((safe["speed_straight"], safe["speed_corner"], safe["target_x_ratio"]),
                          (lc.SAFE_SPEED_STRAIGHT, lc.SAFE_SPEED_CORNER, lc.TARGET_X_RATIO))
-        self.assertLessEqual(safe["speed_corner"], race["speed_corner"])
-        self.assertLess(safe["speed_straight"], race["speed_straight"])
+        pwm = lambda p, k: 370 + p[k] * (p["forward_pwm"] - 370)                # throttle is relative to the preset's PWM
+        self.assertEqual((race["forward_pwm"], safe["forward_pwm"]), (lc.RACE_FORWARD_PWM, lc.SAFE_FORWARD_PWM))
+        self.assertLessEqual(pwm(safe, "speed_corner"), pwm(race, "speed_corner") + 0.5)
+        self.assertLess(pwm(safe, "speed_straight"), pwm(race, "speed_straight"))
         hub.apply_preset("pd")
         self.assertFalse(hub.cfg.pure_pursuit)
         self.assertEqual(hub.cfg.target_x_ratio, 0.40)
@@ -650,5 +668,5 @@ class PresetsAndPage(unittest.TestCase):
         hub, lc, webui = self.hub()
         est = next(p for p in hub.presets() if p["id"] == "race")["estimate"]
         self.assertTrue(est["estimate"])
-        self.assertAlmostEqual(est["lap_s"], 4.05, delta=0.25)            # estimate at 1.00 / 0.86 (assumed speed table); real laps 3.54-3.77 s
+        self.assertAlmostEqual(est["lap_s"], 3.6, delta=0.25)             # estimate at PWM 420, 1.00 / 0.64; real laps mean 3.59 s
         self.assertAlmostEqual(est["total_s"], 10 * est["lap_s"], delta=0.06)

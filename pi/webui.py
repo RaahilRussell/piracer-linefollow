@@ -37,6 +37,7 @@ RUN_NAME = re.compile(r"^\d{8}-\d{6}$")
 # clamps every value, so nothing typed in a browser can exceed them.
 KNOBS = [
     ("top_throttle", "Speed limits", "Overall top speed", 0.0, 1.0, 0.01, "Hard ceiling for every mode, gamepad included."),
+    ("forward_pwm", "Speed limits", "Motor PWM at full throttle", 390, 460, 1, "PWM the ESC gets at throttle 1.0 (stopped = 370). ~/mycar uses 407. Higher makes EVERY throttle value faster, gamepad included: lower the curve speed to match. Live; hard limit 460."),
     ("max_user", "Speed limits", "Max: User mode", 0.0, 1.0, 0.01, "You drive (gamepad or web joystick)."),
     ("max_pilot_steers", "Speed limits", "Max: Pilot steers", 0.0, 1.0, 0.01, "Pilot steers, you give throttle (A once)."),
     ("max_auto", "Speed limits", "Max: Full auto", 0.0, 1.0, 0.01, "Pilot steers and drives (A twice). Also the auto-crawl ceiling."),
@@ -105,7 +106,7 @@ KNOBS = [
 ]
 KNOB_IDS = {k[0] for k in KNOBS}
 KNOB_LABELS = {k[0]: k[2] for k in KNOBS}
-INT_KNOBS = {"s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "corner_plan", "pure_pursuit", "tune_race_first", "tune_evidence", "tune_max_retunes", "tune_confirm_laps", "tune_margin_steps", "lap_sections", "race_laps"}
+INT_KNOBS = {"forward_pwm", "s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "corner_plan", "pure_pursuit", "tune_race_first", "tune_evidence", "tune_max_retunes", "tune_confirm_laps", "tune_margin_steps", "lap_sections", "race_laps"}
 
 # What a preset sets: everything that decides how the car steers and how fast it goes. Presets are
 # built on the server from line_config.py (Hub.presets), so the page never hard-codes a tuning value.
@@ -114,24 +115,24 @@ RACE_KEYS = ("speed_straight", "speed_corner", "speed_transition", "speed_ramp_d
              "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing", "steering_rate_limit",
              "ff_gain", "pure_pursuit", "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "steer_max_deg", "conf_slow_below",
              "corner_blend_start", "corner_blend_full", "corner_exit_steer", "corner_plan",
-             "lost_hold_heading", "coast_s", "slow_s", "max_auto", "top_throttle")
+             "lost_hold_heading", "coast_s", "slow_s", "max_auto", "top_throttle", "forward_pwm")
 # Changes each preset makes to the race values.
 def race_speeds(ex) -> dict:
     """The Race preset's speeds from line_config (RACE_SPEED_*); missing ones fall back to the start-up speeds."""
-    return {k: ex.get("RACE_" + k.upper()) for k in ("speed_straight", "speed_transition", "speed_corner")}
+    return {k: ex.get("RACE_" + k.upper()) for k in ("speed_straight", "speed_transition", "speed_corner", "forward_pwm")}
 
 
 def safe_speeds(ex) -> dict:
     """The Safe race preset's speeds from line_config (SAFE_SPEED_*)."""
-    return {k: ex.get("SAFE_" + k.upper()) for k in ("speed_straight", "speed_transition", "speed_corner")}
+    return {k: ex.get("SAFE_" + k.upper()) for k in ("speed_straight", "speed_transition", "speed_corner", "forward_pwm")}
 
 
-SLOW_LAP = {"speed_straight": 0.75, "speed_corner": 0.70, "speed_transition": 0.75}
+SLOW_LAP = {"speed_straight": 0.75, "speed_corner": 0.70, "speed_transition": 0.75, "forward_pwm": 407}   # speeds driven at PWM 407
 # PD + no feedforward: the steering that has driven the real car (Nov 9, at 0.70-0.75). With the Nov 10
 # camera estimate (0.12 m / 15 deg) 0.75 / 0.70 is the fastest speed that never ran wide in any simulated
 # variation (0.80 / 0.75 fails with delay; 0.90 / 0.85 fails almost everywhere). Target 0.40: PD cuts curves.
 PD_FALLBACK = {"pure_pursuit": 0, "ff_gain": 0.0, "target_x_ratio": 0.40, "steering_smoothing": 0.35,
-               "speed_straight": 0.75, "speed_corner": 0.70, "speed_transition": 0.75}
+               "speed_straight": 0.75, "speed_corner": 0.70, "speed_transition": 0.75, "forward_pwm": 407}
 
 
 def defaults_fingerprint(values: dict) -> str:
@@ -212,6 +213,7 @@ class Hub:
             "pure_pursuit": int(bool(c.pure_pursuit)), "pursuit_ld_m": c.pursuit_ld_m,
             "pursuit_ld_gain_s": c.pursuit_ld_gain_s, "pursuit_pd": c.pursuit_pd, "pursuit_predict_s": c.pursuit_predict_s, "conf_slow_below": c.conf_slow_below, "steer_max_deg": c.steer_max_deg,
             "cam_height_m": self._model().cam_height_m, "cam_pitch_deg": self._model().cam_pitch_deg,
+            "forward_pwm": int(round(self._model().pwm_full)),
             "single_line_stop_s": getattr(self.pilot, "single_line_stop_s", 0.0),
             "lost_hold_heading": int(bool(c.lost_hold_heading)),
             "coast_s": getattr(self.pilot, "coast_s", 0.0), "slow_s": getattr(self.pilot, "slow_s", 0.0),
@@ -247,6 +249,24 @@ class Hub:
         from linetrack.geometry import CarModel
         return getattr(self.pilot, "model", None) or getattr(self.det, "model", None) or CarModel()
 
+    def attach_throttle(self, part):
+        """The donkeycar PWMThrottle (drive_line.py, after add_drivetrain): its forward PWM follows the slider."""
+        self.throttle_part = part
+        self.set_forward_pwm(self._model().pwm_full)
+
+    def set_forward_pwm(self, pwm):
+        """PWM at throttle 1.0, live. The car model follows it so speed estimates (lookahead, lap estimate)
+        stay in step. Clamped to the slider's hard range; the stopped and reverse PWMs are never touched."""
+        spec = next(k for k in KNOBS if k[0] == "forward_pwm")
+        pwm = int(round(min(max(float(pwm), spec[3]), spec[4])))
+        models = {id(m): m for m in (getattr(self.pilot, "model", None), getattr(self.det, "model", None)) if m is not None}
+        for m in models.values():
+            m.pwm_full = float(pwm)
+        part = getattr(self, "throttle_part", None)
+        if part is not None:
+            part.max_pulse = pwm
+        return pwm
+
     def set_camera(self, **values):
         """Change the camera mount (height/tilt) live. The ground projection is rebuilt here and swapped
         in whole, so the car loop never sees a half-built or missing model."""
@@ -280,6 +300,8 @@ class Hub:
             setattr(c, kid, x)
         elif kid in ("cam_height_m", "cam_pitch_deg"):
             self.set_camera(**{kid: x})
+        elif kid == "forward_pwm":
+            self.set_forward_pwm(x)
         elif kid == "throttle":
             c.throttle = min(x, c.max_throttle)
             x = c.throttle
@@ -366,11 +388,11 @@ class Hub:
         out = []
         for pid, label, change, text in (
                 ("race", "Race", {}, f"The race values from line_config.py: straight {race.get('speed_straight', 0):.2f}, curve "
-                 f"{race.get('speed_corner', 0):.2f}, {law}, target {race.get('target_x_ratio', 0):.2f}. Real car, Nov 10: 10 laps 3.54-3.77 s "
-                 "with no line losses. Curve 0.88+ starts to run wide at full lock."),
+                 f"{race.get('speed_corner', 0):.2f} at motor PWM {race.get('forward_pwm', 407):.0f}, {law}, target {race.get('target_x_ratio', 0):.2f}. "
+                 "Real car, Nov 10: PWM 420, 11 laps 3.42-3.70 s (mean 3.59), 1 brief line loss. If it runs wide, press Safe race."),
                 ("safe", "Safe race", self.safe_speeds, f"Race steering at straight {self.safe_speeds.get('speed_straight', 0):.2f} / curve "
-                 f"{self.safe_speeds.get('speed_corner', 0):.2f}: real car, Nov 10: 10 laps 3.67-3.81 s with no "
-                 "line losses. Use it if Race runs wide (low battery, different floor)."),
+                 f"{self.safe_speeds.get('speed_corner', 0):.2f} at motor PWM {self.safe_speeds.get('forward_pwm', 407):.0f}: real car, Nov 10: "
+                 "10 laps 3.67-3.81 s with no line losses. Use it if Race runs wide (low battery, different floor)."),
                 ("slow", "First slow lap", SLOW_LAP, "The race steering at 0.75 / 0.70 throttle (the speed the car has already "
                  "driven, and what the lap tuner climbs from). Use it for the first lap of the day, then press Race."),
                 ("pd", "PD fallback", PD_FALLBACK, "Switches pure pursuit off: PD steering as driven on the real car on Nov 9, "
@@ -410,7 +432,7 @@ class Hub:
         # the traced line is the tape's centre; the car rides half a tape (2.5 cm) + its target offset outside it
         lap = lap_tuning.estimate_lap(v["speed_straight"], v.get("speed_corner") or v["speed_straight"], model.speed_table,
                                       self.track_length_m, self.track_curve_share, ride_offset_m=max(0.0, side) + 0.025,
-                                      pwm_stop=model.pwm_stop, pwm_full=model.pwm_full)
+                                      pwm_stop=model.pwm_stop, pwm_full=float(v.get("forward_pwm") or model.pwm_full))
         if lap is None:
             return None
         n = self.laptimer.race_laps

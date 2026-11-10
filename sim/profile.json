@@ -204,11 +204,15 @@
       [
         407,
         1.8
+      ],
+      [
+        460,
+        3.5
       ]
     ],
     "unit": "[PWM, steady speed m/s]",
     "status": "assumed",
-    "source": "UNKNOWN. Placeholder: deadband to PWM 387 (matches the stick test), linear to 1.8 m/s at 407. Measure timed runs per PWM: CALIBRATION.md step 3"
+    "source": "UNKNOWN. Placeholder: deadband to PWM 387 (matches the stick test), linear to 1.8 m/s at 407. Measure timed runs per PWM: CALIBRATION.md step 3 Nov 10 evening: real laps average ~1.4 m/s at mean PWM ~402 (table: 1.37). 460 -> 3.5 m/s is ASSUMED (no data above 407)."
   },
   "start_pwm": {
     "value": 389,

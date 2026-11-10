@@ -43,7 +43,7 @@ class CarModel:
     brake_decel: float = 1.5             # m/s^2 with throttle released (ASSUMED)
     delay_s: float = 0.08                # camera + processing + actuator, s (rough)
     # speed per throttle command (steady state): PWM = 370 + 37 * cmd, table PWM -> m/s (ASSUMED)
-    speed_table: tuple = ((370, 0.0), (387, 0.0), (390, 0.35), (407, 1.8))
+    speed_table: tuple = ((370, 0.0), (387, 0.0), (390, 0.35), (407, 1.8), (460, 3.5))   # 460: ASSUMED
     pwm_stop: float = 370.0
     pwm_full: float = 407.0
 

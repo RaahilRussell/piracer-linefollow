@@ -144,6 +144,18 @@ def drive(use_joystick: bool, myconfig: str):
                       "line/frame_age", "steering", "throttle", "line/motion"],
               run_condition="run_pilot")
     manage.add_drivetrain(V, cfg)
+    # Forward PWM at throttle 1.0 from line_config / the dashboard (never written to ~/mycar). Set AFTER the
+    # part is built, so donkeycar's ESC start-up pulse still uses ~/mycar's own value.
+    thr_part = next((e["part"] for e in V.parts if type(e["part"]).__name__ == "PWMThrottle"), None)
+    if thr_part is not None:
+        if hub:
+            hub.attach_throttle(thr_part)
+        else:
+            if extras.get("THROTTLE_FORWARD_PWM") is not None:
+                thr_part.max_pulse = int(min(max(extras["THROTTLE_FORWARD_PWM"], 390), 460))
+        print(f"[linefollow] forward PWM at full throttle: {thr_part.max_pulse}", flush=True)
+    else:
+        print("[linefollow] WARNING: no PWMThrottle found; forward PWM stays as ~/mycar sets it", flush=True)
 
     print(f"[linefollow] web UI: http://<pi-ip>:{cfg.WEB_CONTROL_PORT}   A = mode, Y = E-STOP, X = OFF (quit)", flush=True)
     if hasattr(ctr, "print_controls"):

@@ -8,6 +8,53 @@ Conventions:
 
 ---
 
+## Nov 10 evening (2): motor PWM 420 + faster speed-up: Race mean 3.77 → 3.59 s (**real**)
+
+**Where the lap time goes (real telemetry, Race at PWM 407).** The car spent:
+- 76% of the time at the curve throttle
+- 23% in the speed plan's "recovery correction" slowdown
+- only 1–6% at full straight throttle
+
+The straights are ~0.7 m each. At `SPEED_RAMP_UP = 0.4`/s the throttle needs ~0.35 s to climb from curve to straight, which is most of a straight. Curve speed is capped by steering lock (section above), not by the PWM.
+
+**Change.**
+- **Forward PWM is now ours to set.** `THROTTLE_FORWARD_PWM` in `line_config.py` (default 407, the same as `~/mycar`) is the PWM at throttle 1.0.
+  - `drive_line.py` sets it on donkeycar's `PWMThrottle` after `add_drivetrain`. `~/mycar` is never written, and donkeycar's ESC start-up pulse still uses `~/mycar`'s value.
+  - A dashboard slider **Motor PWM at full throttle** changes it live, with a hard range of 390–460. Stopped and reverse PWMs are never touched.
+  - The car model's `pwm_full` follows the slider, so the lookahead and lap estimate stay in step.
+- **Presets carry their PWM.**
+  - Race: `RACE_FORWARD_PWM = 420`.
+  - Safe race (`SAFE_FORWARD_PWM`), First slow lap and PD fallback: 407, the PWM their speeds were driven at.
+- **Race speeds rescaled so curves keep the PWM that ran clean.** 1.00 / 0.69 / 0.64 at PWM 420. Curve 0.64 at 420 = PWM 402 = curve 0.86 at 407. Only the straights get faster.
+- **`SPEED_RAMP_UP` 0.4 → 1.0**/s (the slider maximum).
+- **Fixed a silent bug.** `load_line_config` only reads names listed in `_EXTRAS`, so `THROTTLE_FORWARD_PWM` / `RACE_` / `SAFE_FORWARD_PWM` are now registered there.
+- **Speed table.** Added an *assumed* point, 460 → 3.5 m/s (car and simulator). Check: real laps average ~1.4 m/s at mean PWM ~402, and the table gives 1.37.
+- **Simulator.**
+  - `simdrive` accepts `forward_pwm`, applied to the pilot model and the simulated ESC.
+  - `race_eval` uses `RACE_FORWARD_PWM` by default; `--set forward_pwm=N` overrides it.
+
+**Real results** (same battery session, 30–40 s runs, lap timer):
+
+| PWM | Speeds (straight / transition / curve) | Speed-up /s | Laps | Notes |
+|---|---|---|---|---|
+| 407 | 1.00 / 0.93 / 0.86 | 0.4 | mean 3.77 | baseline |
+| 407 | same | 1.0 | mean 3.75 | no gain: straight and curve PWM are only 5 apart |
+| 420 | 1.00 / 0.69 / 0.64 | 0.4 | mean 3.73 | ramp too slow to use the range |
+| **420** | **1.00 / 0.69 / 0.64** | **1.0** | **mean 3.56–3.59, best 3.41** | 1 brief line loss in 21 laps |
+| 435 | 1.00 / 0.53 / 0.49 | 1.0 | mean 3.59 | more backup / line losses: reaches the curves too fast (the ESC coasts, it doesn't brake) |
+
+Deployed Race preset, final check: **10 laps 3.41–3.71 s, mean 3.59 s (35.9 s), 0 line losses.**
+
+*sim* `race_eval --pairs` at PWM 420, 1.00 / 0.64: passes all 21 variations, 3.54 s nominal (4.18 s slowest).
+
+**Notes.**
+- At PWM 420 the manual stick is faster too: Max User 0.60 = PWM 400 instead of 392. Presets other than Race put 407 back.
+- Next levers, untested:
+  - the "recovery correction" slowdown (23% of the time)
+  - a slightly wider ride line in curves (lower target), which could allow more curve speed before full lock
+
+---
+
 ## Nov 10 evening: camera model corrected to 0.15 m / 8°; Race 1.00 / 0.93 / 0.86 (**real**, first real pure-pursuit laps)
 
 **Symptom (real, run `20261110-142638`, 14:26).** At 0.75 / 0.70 with camera 0.12 m / 15°:

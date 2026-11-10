@@ -297,7 +297,8 @@ class TestPurePursuit(unittest.TestCase):
         sys.path.insert(0, os.path.join(ROOT, "tools"))
         import simdrive
         import line_config as lc
-        r = simdrive.drive(straight=lc.RACE_SPEED_STRAIGHT, corner=lc.RACE_SPEED_CORNER, seconds=20, seed=1)  # race values
+        r = simdrive.drive({"forward_pwm": lc.RACE_FORWARD_PWM}, straight=lc.RACE_SPEED_STRAIGHT, corner=lc.RACE_SPEED_CORNER,
+                           seconds=20, seed=1)  # race values
         self.assertTrue(simdrive.build()[0].pure_pursuit)
         self.assertEqual((r["wide"], r["inside"]), (0, 0))
         self.assertGreaterEqual(r["laps"], 4)

@@ -51,6 +51,9 @@ def main():
     setup = {}
     for item in a.set:
         k, v = item.split("=", 1)
+        if k == "forward_pwm":
+            setup[k] = float(v)
+            continue
         cfg0 = sd.build()[0]
         cur = getattr(cfg0, k)
         setup[k] = bool(parse_value(v)) if isinstance(cur, bool) else type(cur)(parse_value(v))
@@ -58,13 +61,15 @@ def main():
     if not speeds:  # default: the race values (line_config RACE_SPEED_*), not the slower start-up speeds
         _, ex = sd.load_line_config(sd.line_config)
         speeds = [(ex["RACE_SPEED_STRAIGHT"], ex["RACE_SPEED_CORNER"])]
+        if ex.get("RACE_FORWARD_PWM") is not None and "forward_pwm" not in setup:
+            setup["forward_pwm"] = ex["RACE_FORWARD_PWM"]     # the race speeds are throttle at this PWM
     if a.pairs:
         for name, (x, y) in PAIRS.items():
             sd.VARIATIONS[name] = {**sd.VARIATIONS[x], **sd.VARIATIONS[y]}
     names = list(sd.VARIATIONS)
     cfg, pilot, _ = sd.build(setup)
     print(f"SIMULATED. Steering: {'pure pursuit' if cfg.pure_pursuit else 'PD + feedforward'}, target {cfg.target_x_ratio}, "
-          f"full lock {cfg.steer_max_deg} deg. {a.seeds} seeds x {a.seconds:.0f} s x {len(names)} physics variations.")
+          f"full lock {cfg.steer_max_deg} deg, forward PWM {pilot.model.pwm_full:.0f}. {a.seeds} seeds x {a.seconds:.0f} s x {len(names)} physics variations.")
     with Pool(max(1, min(10, os.cpu_count() or 2))) as pool:
         for st, co in speeds:
             res = sd.sweep(setup, st, co, a.seconds, a.seeds, names, pool)
