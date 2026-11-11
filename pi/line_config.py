@@ -64,8 +64,9 @@ PURSUIT_TURN_IN = 0.0      # curve entry: pull steering toward the visible curve
 # Metres from the inside tape's lane-side edge to the car's centre. This is the
 # proven physical setup currently saved on the car.
 RACING_LINE = True
-RACING_APEX_M = -0.04
-RACING_STRAIGHT_M = 0.16
+RACING_STEER_MAX_DEG = 13.4  # tuned controller angle ONLY for Racing Line; ordinary Race stays 18 degrees
+RACING_APEX_M = -0.05
+RACING_STRAIGHT_M = 0.17
 RACING_TURN_IN_M = 1.5     # stay wide until the curve starts this close ahead, then cut in and hold. 1.5 = cut in as soon as a curve is visible.
 PURSUIT_PREDICT_S = 0.15   # racer-v2: delay compensation, aim from where the car will be this long after the frame (0 = off).
                            # Matches the ~150 ms command-to-motion lag in the Nov 8 logs. Sim at 1.00/0.92 --pairs: 0 -> 123 wide
@@ -142,11 +143,11 @@ SPEED_CORNER = 0.90
 #   the afternoon video setup (PWM 407, 1.00/0.93/0.86) lost the line and ran wide. Curve 0.85 lost the line 9% of the
 #   time; 0.82 ran wide twice in 10 laps. Curve speed is the limit: the car is at full lock on the 0.54 m inner radius.
 #   On a tired battery the same throttle is slower: if laps get slow, raise the curve throttle a step at a time.
-# The dashboard's "Race" preset (it also sets the forward PWM; other presets use 407).
-RACE_FORWARD_PWM = 408
+# Legacy "Race" preset: retain the earlier proven fresh-battery values; Racing Line has its own preset.
+RACE_FORWARD_PWM = 407
 RACE_SPEED_STRAIGHT = 1.00
-RACE_SPEED_TRANSITION = 0.94
-RACE_SPEED_CORNER = 0.90
+RACE_SPEED_TRANSITION = 0.84
+RACE_SPEED_CORNER = 0.80
 # SAFE RACE: 0.92 / 0.80 / 0.76 at PWM 407. REAL Nov 10 night (fresh battery, same steering): 7 laps 3.82-4.06 s, no wide laps.
 # Don't go lower in the curves: 0.64 (PWM 394) is near where the motor barely moves, and laps took 5-6 s.
 SAFE_SPEED_STRAIGHT = 0.92
@@ -175,7 +176,7 @@ MAX_THROTTLE = 1.00        # hard cap for any pilot throttle (fixed or auto-craw
 # ~/mycar's own value is 407 (its comment: "was 500"). We never write ~/mycar: drive_line.py sets this on the
 # throttle part after donkeycar builds it, and the dashboard slider changes it live (hard limit 460).
 # Raising it makes EVERY throttle value faster (manual stick included): re-tune the speeds with it.
-THROTTLE_FORWARD_PWM = 408
+THROTTLE_FORWARD_PWM = 407
 
 # --- Battery telemetry (PiRacer Pro onboard INA219) ------------------------------
 # Read asynchronously at 1 Hz so I2C monitoring cannot delay the steering loop.
@@ -192,24 +193,23 @@ BATTERY_SAMPLE_S = 1.0
 # at all, raise it in steps of 0.05.
 TOP_THROTTLE = 1.00        # (~PWM 407) overall cap; reverse / emergency braking remains available.
 
-# BEST MODEL (preserved from Claude's proven ~3.08 s setup; 2026-11-11).
-# Load this before the next tuning session. The only intentional deviation from
-# the older 13.5 deg run is the small 13.3 deg steering-model refinement requested
-# by the driver. Do not overwrite this with a speculative speed test.
+# RACING LINE MIDDLE PROFILE (separate from the previous Race / Safe Race presets).
+# Tested middle configuration, preserved as the Racing Line rollback for race day.
+# 13.4 deg is a controller tune, NOT a measured physical full-lock angle.
 BEST_MODEL_SETUP = {
     "racing_line": 1,
     "pure_pursuit": 1,
     "pursuit_turn_in": 0.0,
-    "racing_apex_m": -0.04,
-    "racing_straight_m": 0.16,
+    "racing_apex_m": -0.05,
+    "racing_straight_m": 0.17,
     "racing_turn_in_m": 1.5,
     "speed_straight": 1.00,
     "speed_transition": 0.94,
     "speed_corner": 0.90,
     "speed_ramp_down": 2.0,
     "speed_ramp_up": 1.0,
-    "steer_max_deg": 13.3,
-    "forward_pwm": 408,
+    "racing_steer_max_deg": 13.4,
+    "forward_pwm": 407,
 }
 
 # --- Max speed per mode (each is ALSO limited by TOP_THROTTLE) -------------------
