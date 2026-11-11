@@ -95,7 +95,7 @@ class TestPhysicsLimits(unittest.TestCase):
         self.assertTrue(s["slip_pct"] > 0 or s["off_track"] > 0)
 
     def test_crawl_laps_cleanly(self):
-        w, _ = run_one(P, seconds=40, speed=0.65)
+        w, _ = run_one(P, seconds=40, speed=0.65, overrides={"racing_line": False})
         s = w.metrics.summary()
         self.assertEqual(s["off_track"], 0)
         self.assertGreaterEqual(s["laps"], 2)

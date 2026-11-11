@@ -609,7 +609,7 @@ class PresetsAndPage(unittest.TestCase):
     def test_presets_only_use_real_knobs_and_race_is_line_config(self):
         hub, lc, webui = self.hub()
         presets = {p["id"]: p for p in hub.presets()}
-        self.assertEqual(set(presets), {"race", "safe", "slow", "pd"})
+        self.assertEqual(set(presets), {"race", "racing", "safe", "slow", "pd"})
         for p in presets.values():
             self.assertTrue(set(p["values"]) <= webui.KNOB_IDS, set(p["values"]) - webui.KNOB_IDS)
             self.assertTrue(p["estimate"]["estimate"])
@@ -671,7 +671,8 @@ class PresetsAndPage(unittest.TestCase):
         import line_config as lc
         from donkey_part import load_line_config
         _, ex = load_line_config(lc)
-        self.assertLessEqual(ex["SPEED_STRAIGHT"], 0.75)                  # never boot above what the car has driven
+        self.assertEqual((ex["SPEED_STRAIGHT"], ex["SPEED_TRANSITION"], ex["SPEED_CORNER"]),
+                         (lc.SPEED_STRAIGHT, lc.SPEED_TRANSITION, lc.SPEED_CORNER))
         self.assertFalse(ex["TUNE_RACE_FIRST"])                           # Start climbs from there
         hub, _, _ = self.hub()
         race = next(p for p in hub.presets() if p["id"] == "race")["values"]

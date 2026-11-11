@@ -109,6 +109,12 @@ class Config:
     pursuit_predict_s: float = 0.0     # delay compensation: aim from where the car will be this many s after the frame (0 = off)
     pursuit_turn_in: float = 0.0       # curve entry: pull steering this share of the way toward the visible curve's own
                                        # steering when pure pursuit asks for less turn into it (never less; 0 = off)
+    # Racing line (linetrack/racing_line.py): hug the inside tape, a little wider on the straights than in the curves.
+    racing_line: bool = False
+    racing_apex_m: float = 0.03        # car centre to the inside tape's lane-side edge in a curve (0 = on the edge, < 0 = over it)
+    racing_straight_m: float = 0.12    # the same distance on the straights (wider than the apex opens the turn)
+    racing_turn_in_m: float = 1.5      # stay wide until the curve starts this close ahead (m), then go for the apex and hold it through
+                                       # the curve. 1.5 = cut in as soon as a curve is visible (the edge is never seen further than that)
 
     # --- Safety / timing ---
     min_confidence: float = 0.35

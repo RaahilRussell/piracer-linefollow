@@ -20,6 +20,7 @@ Sign convention: angle -1 = left, +1 = right (matches the car's PWM calibration)
 """
 from __future__ import annotations
 
+import math
 import time
 import zlib
 
@@ -29,8 +30,9 @@ import numpy as np
 from linetrack.config import Config
 from linetrack.controller import DRIVE, STEER_ONLY, Command, SteeringController
 from linetrack.detector import LeftLineDetector
-from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, fit_bend, predict_goal, pursuit_goal,
+from linetrack.geometry import (Bend, CarModel, GroundModel, allowed_speed, cmd_for_speed, fit_bend, predict_goal, pursuit_goal, ride_line,
                                 pursuit_steer, speed_of_cmd, steer_for_curvature)
+from linetrack.racing_line import CURVE_FULL, CURVE_START, curve_start_distance, inner_curvature, ride_offset
 
 # extra keys in line_config.py that are not Config fields
 _EXTRAS = {"RESET_AFTER_GAP_S": 0.3, "SHOW_OVERLAY": True, "TOP_THROTTLE": 0.35, "RECORD": False,
@@ -51,6 +53,7 @@ _EXTRAS = {"RESET_AFTER_GAP_S": 0.3, "SHOW_OVERLAY": True, "TOP_THROTTLE": 0.35,
            "WHEELBASE_M": None, "STEER_MAX_DEG": None, "CAMERA_FOV_DEG": None, "CAM_HEIGHT_M": None,
            "CAM_PITCH_DEG": None, "CAM_FWD_M": None, "GRIP_MU": None, "BRAKE_DECEL": None,
            "CONTROL_DELAY_S": None, "SPEED_TABLE": None,
+           "RACING_LINE": False, "RACING_APEX_M": 0.03, "RACING_STRAIGHT_M": 0.12, "RACING_TURN_IN_M": 1.5,
            "BATTERY_I2C_BUS": 1, "BATTERY_I2C_ADDR": 0x42, "BATTERY_SAMPLE_S": 1.0}
 
 
@@ -188,6 +191,13 @@ class LineDetectorPart:
             cv2.polylines(out, [det.curve.astype(np.int32)], False, (0, 255, 0), 2)    # left edge (green)
         if len(det.right_curve) > 1:
             cv2.polylines(out, [det.right_curve.astype(np.int32)], False, (255, 170, 0), 1)  # right ref (amber)
+        ride = getattr(self.pilot, "racing_ride", None) if self.cfg.racing_line else None
+        if ride is not None and len(ride) > 1 and self.ground is not None:
+            # the racing line the pilot steered along on the previous frame (magenta)
+            px = self.ground.to_pixels(ride, W, H)
+            px = px[np.isfinite(px).all(1) & (px[:, 1] > 0) & (px[:, 1] < H)]
+            if len(px) > 1:
+                cv2.polylines(out, [px.astype(np.int32)], False, (255, 0, 255), 2)
         if det.lookahead_x is not None:
             p = (int(det.lookahead_x), int(det.lookahead_y))
             cv2.circle(out, p, 4, (255, 0, 255), 1)
@@ -204,6 +214,10 @@ class LineDetectorPart:
         cv2.putText(out, f"{status} {src} c{det.confidence:.2f} {self.proc_ms:.0f}ms{mv}",
                     (2, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.32, col, 1, cv2.LINE_AA)
         if cmd is not None:  # steering bar along the bottom (only while pilot runs)
+            if self.cfg.racing_line:
+                label = "RACE-LINE" if getattr(self.pilot, "racing_active", False) else "RACE-LINE fallback"
+                cv2.putText(out, label, (W - 104, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.30,
+                            (255, 220, 0) if getattr(self.pilot, "racing_active", False) else (120, 120, 255), 1, cv2.LINE_AA)
             cx, by = W // 2, H - 5
             cv2.rectangle(out, (cx, by - 3), (cx + int(cx * 0.9 * cmd.angle), by + 3), (255, 200, 0), -1)
             cv2.line(out, (cx, by - 5), (cx, by + 5), (255, 255, 255), 1)
@@ -308,6 +322,15 @@ class LineFollowerPilot:
         self.model = model or CarModel()
         self.bend_source = None     # callable -> Bend | None (drive_line.py: lambda: det.bend)
         self.path_source = None     # callable -> LineDetectorPart.path (edge ground points) for pure pursuit
+        self.racing_active = False          # racing line steering this frame (cfg.racing_line)
+        self.racing_fallback_reason = None  # why not, when it is switched on but normal pursuit is steering
+        self.racing_offset_m = None         # distance from the inside tape the racing line rides at right now
+        self.racing_target = None           # ... as a position on the lookahead row, for the PD correction
+        self.racing_ride = None             # the ride line (ground points) for the overlay
+        self._racing_k = None               # smoothed curvature of the inside tape
+        self._racing_in = False             # turned in for the curve ahead (latched until the next straight)
+        self._racing_force_t = None         # when the forced full-lock turn-in began (None = not forcing)
+        self._racing_off = None             # smoothed ride distance
         self.conf_source = None     # callable -> detection confidence 0..1 (for the low-confidence slowdown)
         self.conf_cap = None        # throttle cap from a low-confidence detection this frame, or None
         self.pursuit_goal = None    # pure-pursuit goal point this frame (x, y) m, or None
@@ -403,7 +426,7 @@ class LineFollowerPilot:
         c = self.cfg
         return max(1.0, c.racing_steer_max_deg if c.racing_line else c.steer_max_deg)
 
-    def _pursuit(self, path):
+    def _pursuit(self, path, bend=None):
         """Pure-pursuit steering command for this frame, or None when the edge can't be aimed at
         (then the frame falls back to plain PD). Never lets geometry trouble stop the car loop."""
         self.pursuit_goal = None
@@ -416,7 +439,9 @@ class LineFollowerPilot:
             c = self.cfg
             full_lock_deg = self._effective_steer_max_deg()
             # where the tracked edge runs beside the car when it rides at the target
-            lateral = self.ground.lateral_at(c.lookahead_ratio, c.target_x_ratio + (lane_ratio if source == "right" else 0.0))
+            lateral = self._racing_lateral(path, bend)
+            if lateral is None:
+                lateral = self.ground.lateral_at(c.lookahead_ratio, c.target_x_ratio + (lane_ratio if source == "right" else 0.0))
             if lateral is None:
                 return None
             v = speed_of_cmd(self.model, self._last_drive_thr)
@@ -434,6 +459,57 @@ class LineFollowerPilot:
         except Exception:
             return None
 
+    def _racing_lateral(self, path, bend):
+        """Racing line: the tracked edge's distance from the ride line for this frame, or None when
+        normal pursuit (the fixed target) should steer. Wide on straights, at the apex distance in curves."""
+        self.racing_active, self.racing_fallback_reason = False, None
+        self.racing_offset_m = self.racing_target = self.racing_ride = None
+        c = self.cfg
+        if not c.racing_line:
+            return None
+        ground, source, lane_ratio = path
+        a = self.ground.lateral_at(c.lookahead_ratio, c.target_x_ratio)
+        b = self.ground.lateral_at(c.lookahead_ratio, c.target_x_ratio + lane_ratio)
+        if a is None or b is None:
+            self.racing_fallback_reason = "lane width unknown"
+            return None
+        lane_m = a - b
+        if bend is not None and np.isfinite(bend.edge_curvature):
+            k = inner_curvature(bend.edge_curvature, source, lane_m)
+            self._racing_k = k if self._racing_k is None else 0.5 * self._racing_k + 0.5 * k
+        if self._racing_k is None:
+            self.racing_fallback_reason = "curve shape not visible yet"
+            return None
+        weight = None
+        if c.racing_turn_in_m < 1.45:
+            # Stay wide down the straight; go for the apex only once the curve starts within turn_in_m,
+            # then hold it until the curve is behind (the visible curvature has gone). Aiming at the apex
+            # whenever a curve is VISIBLE makes the car creep to the inside along the straight, arrive at
+            # the tape at the curve's entry and run wide through its middle at full lock (real laps, Nov 11).
+            seen = min(1.0, max(0.0, (self._racing_k - CURVE_START) / (CURVE_FULL - CURVE_START)))
+            ahead = curve_start_distance(ground)
+            if seen < 0.15:
+                self._racing_in, self._racing_force_t = False, None
+            if ahead is not None and ahead <= c.racing_turn_in_m and seen >= 0.15:
+                if not self._racing_in:
+                    self._racing_force_t = self._t_last        # turn in NOW: see run()
+                self._racing_in = True
+            weight = seen * seen * (3.0 - 2.0 * seen) if self._racing_in else 0.0
+        # No steering-lock floor on the cut: the driver wants the car right over the inside tape, and on the real
+        # car the floor (about -3 to -5 cm on this mat) silently capped every deeper setting.
+        off, diag = ride_offset(self._racing_k, lane_m, c.racing_apex_m, c.racing_straight_m, None, weight)
+        if off is None:
+            self.racing_fallback_reason = diag["reason"]
+            return None
+        if weight is not None:                       # no step in the aim when a curve comes into view
+            off = off if self._racing_off is None else 0.6 * self._racing_off + 0.4 * off
+        self._racing_off = off
+        self.racing_active, self.racing_offset_m = True, off
+        self.racing_target = self.ground.x_ratio_for_lateral(c.lookahead_ratio, off)
+        lateral = off - lane_m if source == "right" else off
+        self.racing_ride = ride_line(ground, lateral)
+        return lateral
+
     def run(self, mode, x_ratio, found, frame_age, motion=None, both=True, bend=None, path=None):
         if bend is None and self.bend_source is not None:
             bend = self.bend_source()
@@ -447,7 +523,8 @@ class LineFollowerPilot:
                 self.crawl.reset()
             self._t_both = now
             self._t_lost, self._last_drive_thr = None, 0.0
-            self.curvature = None
+            self.curvature = self._racing_k = self._racing_off = None
+            self._racing_in, self._racing_force_t = False, None
             if self.speed_plan is not None:
                 self.speed_plan.reset()
             dt = 1.0 / 20
@@ -458,7 +535,21 @@ class LineFollowerPilot:
         ctl_mode = DRIVE if mode == "local" else STEER_ONLY
         k = self._curvature(bend) if found else None
         ff, target, ff_scale, gain_scale = 0.0, None, None, 1.0
-        pursuit = self._pursuit(path) if (found and self.cfg.pure_pursuit) else None
+        pursuit = self._pursuit(path, bend) if (found and self.cfg.pure_pursuit) else None
+        if pursuit is None:
+            self.racing_active = False
+        elif self.racing_active and self._racing_force_t is not None:
+            # Timed turn-in: full lock from the turn-in point, while the car is still out wide. The car's turning
+            # circle at speed (about 0.78 m) is bigger than the inside tape's (0.58 m), so where the car is closest
+            # to the tape is set only by where full lock begins: begin on the tape at the entry and the closest
+            # point IS the entry; begin about a quarter metre before the curve from the wide line and it is the apex.
+            # Pursuit alone asks for about 0.7 there and gets to full lock 0.3 s late. Hand back once pursuit itself
+            # wants full lock, or after 0.6 s whatever happens.
+            turn = -1.0 if (self._racing_k or 0.0) >= 0 else 1.0
+            if abs(pursuit) >= 0.9 and pursuit * turn > 0 or self._t_last - self._racing_force_t > 0.6:
+                self._racing_force_t = None
+            else:
+                pursuit = turn
         if not self.cfg.pure_pursuit:
             self.pursuit_goal = None
         if pursuit is not None:
@@ -473,11 +564,15 @@ class LineFollowerPilot:
                     pursuit = pursuit + turn_in * (want - pursuit)
             ff, ff_scale = pursuit, 1.0
             gain_scale = min(1.0, max(0.0, self.cfg.pursuit_pd))
+            # the PD correction must pull toward the line pursuit is riding, not the fixed target
+            racing = self.racing_active and self.racing_target is not None
+            base = self.racing_target if racing else self.cfg.target_x_ratio
+            target = base if racing else None
             if k is not None and gain_scale > 0:
                 # In a curve the edge sits left of the target even when the car is exactly on its
                 # line. Aim the PD correction at where the edge SHOULD be, or it adds a second
                 # helping of steering and the car cuts the inside line.
-                xe = self.ground.expected_x_ratio(self.cfg.lookahead_ratio, self.cfg.target_x_ratio, k)
+                xe = self.ground.expected_x_ratio(self.cfg.lookahead_ratio, base, k)
                 if xe is not None:
                     target = xe
         elif k is not None and self.cfg.ff_gain > 0:

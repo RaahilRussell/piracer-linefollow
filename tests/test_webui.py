@@ -32,7 +32,8 @@ def make_hub(clock=None, data_dir="data", tuning=None):
     det.pilot = pilot
     cap = ThrottleCap(0.6)
     hub = webui.Hub(cfg, pilot, det, crawl=crawl, cap=cap, data_dir=data_dir, tuning_path=tuning,
-                    clock=clock or time.monotonic)
+                    clock=clock or time.monotonic,
+                    race_speeds=webui.race_speeds(ex), safe_speeds=webui.safe_speeds(ex))
     return hub, cfg, pilot, crawl, cap
 
 

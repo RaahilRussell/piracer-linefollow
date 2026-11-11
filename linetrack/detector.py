@@ -485,9 +485,15 @@ class LeftLineDetector:
             if not trk.live:
                 continue
             g = gate * min(2.0, 1.0 + 0.25 * trk.miss)
+            # Racing line with a deep cut: the car drives OVER the inside tape, so the tape slides across the image
+            # centre and ends up on the right, leaning left. A line that has been followed frame after frame keeps
+            # its name through that; the veto is only for naming a line that was not being tracked.
+            # (Real laps, Nov 11: the veto dropped the inside tape at 2-10 px from its track, every curve.)
+            crossing = (side == "L" and trk.hits >= 3 and getattr(c, "racing_line", False)
+                        and getattr(c, "racing_apex_m", 1.0) < 0.03)
             for s in stripes:
                 d = self._track_dist(s, side, H)
-                if d <= g and not self._vetoed(s, side, W):
+                if d <= g and (crossing or not self._vetoed(s, side, W)):
                     cand.append((d / g, d, side, s))
         cand.sort(key=lambda t: t[0])
         taken = set()

@@ -333,7 +333,8 @@ class TestPurePursuit(unittest.TestCase):
         sys.path.insert(0, os.path.join(ROOT, "tools"))
         import simdrive
         import line_config as lc
-        r = simdrive.drive({"forward_pwm": lc.RACE_FORWARD_PWM}, straight=lc.RACE_SPEED_STRAIGHT, corner=lc.RACE_SPEED_CORNER,
+        r = simdrive.drive({"forward_pwm": lc.RACE_FORWARD_PWM, "racing_line": False},
+                           straight=lc.RACE_SPEED_STRAIGHT, corner=lc.RACE_SPEED_CORNER,
                            seconds=20, seed=1)  # race values
         self.assertTrue(simdrive.build()[0].pure_pursuit)
         self.assertEqual((r["wide"], r["inside"]), (0, 0))
@@ -375,7 +376,7 @@ class TestInSimulator(unittest.TestCase):
         from sim.params import Profile
         from sim.world import World
         prof, clk = Profile.load(), _Clock()
-        ctrl = PilotController("t", {"kp": 3.0, "kd": 1.0, "ff_gain": 0.6}, speed=0.7, clock=clk)
+        ctrl = PilotController("t", {"kp": 3.0, "kd": 1.0, "ff_gain": 0.6, "racing_line": False}, speed=0.7, clock=clk)
         w = World(prof, seed=3, target_ratio=ctrl.cfg.target_x_ratio, row_ratio=ctrl.cfg.lookahead_ratio)
         ks = []
         while w.t < 20:

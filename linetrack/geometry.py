@@ -82,6 +82,34 @@ def project_pixels(u, v, W, H, fov_deg, pitch_deg, height_m, fwd_m, roll_deg=0.0
     return gx, gy
 
 
+def ground_to_pixels(gx, gy, W, H, fov_deg, pitch_deg, height_m, fwd_m, roll_deg=0.0, k1=0.0, cx_px=0.0):
+    """Ground point(s) in the car frame -> image pixel(s) (u, v): the inverse of project_pixels.
+    Only used to draw planned paths on the camera overlay."""
+    gx, gy = np.asarray(gx, float), np.asarray(gy, float)
+    half_diag = math.hypot(W / 2, H / 2)
+    th_max = math.radians(fov_deg / 2)
+    rho_max = th_max
+    for _ in range(30):
+        g, dg = rho_max * (1 + k1 * rho_max * rho_max) - th_max, 1 + 3 * k1 * rho_max * rho_max
+        rho_max -= g / dg if abs(dg) > 1e-9 else 0.0
+    f = half_diag / max(rho_max, 1e-6)
+    phi = math.radians(pitch_deg)
+    dX, dY, dZ = gx - fwd_m, gy, -float(height_m)          # ray from the lens to the ground point
+    rx = -dY
+    ry = -dX * math.sin(phi) - dZ * math.cos(phi)
+    rz = dX * math.cos(phi) - dZ * math.sin(phi)
+    theta = np.arctan2(np.hypot(rx, ry), rz)
+    rho = theta.copy()
+    for _ in range(12 if k1 else 0):                       # theta = rho (1 + k1 rho^2)
+        rho = rho - (rho * (1 + k1 * rho * rho) - theta) / (1 + 3 * k1 * rho * rho)
+    az = np.arctan2(ry, rx)
+    dx, dy = f * rho * np.cos(az), f * rho * np.sin(az)
+    if roll_deg:
+        cr, sr = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
+        dx, dy = cr * dx - sr * dy, sr * dx + cr * dy
+    return dx + W / 2 + cx_px, dy + H / 2
+
+
 class GroundModel:
     """Pixel -> ground point (car frame: X forward of the rear axle, Y left +), metres."""
 
@@ -137,6 +165,25 @@ class GroundModel:
         u = int(np.clip(round(x_ratio * m.image_w - 0.5), 0, m.image_w - 1))
         y = self.gy[r, u]
         return float(y) if np.isfinite(y) else None
+
+    def x_ratio_for_lateral(self, row_ratio: float, lateral_m: float) -> float | None:
+        """Inverse of lateral_at: where on this image row a line lying `lateral_m` beside the car appears."""
+        m = self.m
+        r = min(m.image_h - 1, int(row_ratio * m.image_h))
+        gy = self.gy[r]
+        ok = np.isfinite(gy)
+        if not ok.any():
+            return None
+        d = np.where(ok, np.abs(gy - lateral_m), np.inf)
+        return float((int(np.argmin(d)) + 0.5) / m.image_w)
+
+    def to_pixels(self, ground: np.ndarray, img_w: int, img_h: int) -> np.ndarray:
+        """Ground points (X, Y) -> image points (x, y) in an img_w x img_h image (for the overlay)."""
+        m = self.m
+        g = np.asarray(ground, float).reshape(-1, 2)
+        u, v = ground_to_pixels(g[:, 0], g[:, 1], m.image_w, m.image_h, m.camera_fov_deg, m.cam_pitch_deg,
+                                m.cam_height_m, m.cam_fwd_m, m.cam_roll_deg, m.lens_k1, m.cam_cx_px)
+        return np.stack([u * img_w / m.image_w, v * img_h / m.image_h], 1)
 
     def row_distance(self, row_ratio: float) -> float:
         r = min(self.m.image_h - 1, int(row_ratio * self.m.image_h))
@@ -213,15 +260,9 @@ def steer_for_curvature(m: CarModel, curvature: float, steer_max_deg: float | No
     return float(np.clip(-delta / (steer_max_deg or m.steer_max_deg), -1.0, 1.0))
 
 
-def pursuit_goal(ground: np.ndarray, lateral: float, lookahead: float, min_pts: int = 5,
-                 max_dist: float = 1.6, min_reach: float = 0.25):
-    """Pure-pursuit goal point: where the RIDE line is `lookahead` metres from the rear axle.
-
-    ground: the tracked edge's ground points (X forward, Y left +), ordered near -> far.
-    lateral: the edge's Y when the car rides at its target (left line > 0, right line < 0); the
-    ride line is the edge moved sideways by that much, so it passes through the car when on target.
-    Returns (x, y) or None when the edge is too short to aim at. If the edge ends before the
-    lookahead distance (it leaves the image in a tight curve) the farthest ride point is used."""
+def ride_line(ground: np.ndarray, lateral: float, min_pts: int = 5, max_dist: float = 1.6):
+    """The line the car should ride: the tracked edge moved sideways by `lateral` (the edge's Y when
+    the car is on target: left line > 0, right line < 0). Points near -> far, or None if too short."""
     if ground is None or len(ground) < min_pts:
         return None
     g = np.asarray(ground, float)
@@ -238,7 +279,20 @@ def pursuit_goal(ground: np.ndarray, lateral: float, lookahead: float, min_pts: 
     g, t = g[ok], t[ok] / n[ok, None]
     ride = g - lateral * np.stack([-t[:, 1], t[:, 0]], 1)          # shift along the left normal
     ride = ride[ride[:, 0] > 0.0]
-    if len(ride) < 2:
+    return ride if len(ride) >= 2 else None
+
+
+def pursuit_goal(ground: np.ndarray, lateral: float, lookahead: float, min_pts: int = 5,
+                 max_dist: float = 1.6, min_reach: float = 0.25):
+    """Pure-pursuit goal point: where the RIDE line is `lookahead` metres from the rear axle.
+
+    ground: the tracked edge's ground points (X forward, Y left +), ordered near -> far.
+    lateral: the edge's Y when the car rides at its target (left line > 0, right line < 0); the
+    ride line is the edge moved sideways by that much, so it passes through the car when on target.
+    Returns (x, y) or None when the edge is too short to aim at. If the edge ends before the
+    lookahead distance (it leaves the image in a tight curve) the farthest ride point is used."""
+    ride = ride_line(ground, lateral, min_pts, max_dist)
+    if ride is None:
         return None
     d = np.hypot(ride[:, 0], ride[:, 1])
     beyond = np.nonzero(d >= lookahead)[0]
