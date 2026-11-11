@@ -62,6 +62,7 @@ KNOBS = [
     ("pursuit_pd", "Steering law", "PD share with pursuit", 0.0, 1.0, 0.05, "Share of KP/KD added on top of pure pursuit as camera-error feedback. 0.15 = default mix; 0 = pursuit alone; 0.3+ ran wide at race speed in the simulator."),
     ("steer_max_deg", "Steering law", "Full-lock wheel angle (deg)", 10.0, 30.0, 0.5, "Wheel angle at full steering. 18 is fitted to recorded runs, not measured. Used by pure pursuit and feedforward; the simulator uses the same value."),
     ("pursuit_predict_s", "Steering law", "Delay compensation (s)", 0.0, 0.3, 0.01, "Pure pursuit aims from where the car will be this long after the camera frame (it keeps moving while the frame is processed and the servo turns). 0 = off. Logs suggest about 0.15 s from command to motion."),
+    ("pursuit_turn_in", "Steering law", "Curve turn-in", 0.0, 1.0, 0.05, "On curve entry, pull steering this share of the way toward what the visible curve needs, when pure pursuit is turning in less (it aims at where the inner line leaves the image, so it turns in late). Only ever adds turn into the curve. 0 = off."),
     ("conf_slow_below", "Full auto speed", "Slow when detection below", 0.0, 0.9, 0.05, "Below this line-detection confidence, throttle blends down to curve speed (reaching it at Min confidence). Real tracking is usually 0.7-0.85. 0 = off."),
     ("cam_height_m", "Steering law", "Camera height (m)", 0.08, 0.22, 0.005, "Lens centre above the floor. 0.15 is fitted to real race-mat frames (lane width, curve radius, line spacing); a ruler beats it. Pure pursuit aims through this: set too high and the car runs wide. 0.12 (with tilt 15) made it cut every curve."),
     ("cam_pitch_deg", "Steering law", "Camera tilt down (deg)", 0.0, 30.0, 0.5, "How far the camera's view points down from horizontal. 8 is fitted to real race-mat frames (the two tape edges come out parallel); 15 made them converge 4x more. Measure with a phone level. Set too low and pure pursuit runs wide."),
@@ -78,7 +79,7 @@ KNOBS = [
     ("corner_margin", "Full auto speed", "Corner speed margin", 0.5, 1.0, 0.05, "Fraction of the grip-limited corner speed to allow."),
     ("lap_sections", "Lap timer", "Straight/curve changes per lap", 2, 16, 1, "4 for an oval (straight, curve, straight, curve). Count yours once and set it here."),
     ("race_laps", "Lap timer", "Laps in a race", 1, 30, 1, "The race total adds up this many of the latest laps (competition: 10)."),
-    ("lap_debounce_s", "Lap timer", "Section must hold (s)", 0.0, 1.0, 0.05, "A straight/curve change only counts once the new section has held this long, so a brief flicker is not a change."),
+    ("lap_debounce_s", "Lap timer", "Section must hold (s)", 0.0, 1.0, 0.05, "A straight/curve change only counts once the new section has held this long, so a brief flicker is not a change. 0.25 missed the short straights at race speed (Nov 10 night): 0.10."),
     ("lap_min_s", "Lap timer", "Shortest possible lap (s)", 0.5, 10.0, 0.1, "Changes that add up to a lap faster than this are treated as flicker and ignored."),
     ("track_length_m", "Lap timer", "Track length (m)", 1.0, 30.0, 0.01, "Length of the inside line, for the lap-time estimate. 4.98 is traced from the Waveshare mat."),
     ("track_curve_share", "Lap timer", "Share of the track that is curve", 0.0, 1.0, 0.01, "For the lap-time estimate. 0.71 is traced from the Waveshare mat."),
@@ -113,7 +114,7 @@ INT_KNOBS = {"forward_pwm", "s_lo", "v_lo", "auto_crawl", "lost_hold_heading", "
 RACE_KEYS = ("speed_straight", "speed_corner", "speed_transition", "speed_ramp_down", "speed_ramp_up",
              "kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd",
              "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing", "steering_rate_limit",
-             "ff_gain", "pure_pursuit", "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "steer_max_deg", "conf_slow_below",
+             "ff_gain", "pure_pursuit", "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "pursuit_turn_in", "steer_max_deg", "conf_slow_below",
              "corner_blend_start", "corner_blend_full", "corner_exit_steer", "corner_plan",
              "lost_hold_heading", "coast_s", "slow_s", "max_auto", "top_throttle", "forward_pwm")
 # Changes each preset makes to the race values.
@@ -212,7 +213,7 @@ class Hub:
             "lost_timeout_s": c.lost_timeout_s,
             "ff_gain": c.ff_gain, "corner_plan": int(bool(c.corner_plan)), "corner_margin": c.corner_margin,
             "pure_pursuit": int(bool(c.pure_pursuit)), "pursuit_ld_m": c.pursuit_ld_m,
-            "pursuit_ld_gain_s": c.pursuit_ld_gain_s, "pursuit_pd": c.pursuit_pd, "pursuit_predict_s": c.pursuit_predict_s, "conf_slow_below": c.conf_slow_below, "steer_max_deg": c.steer_max_deg,
+            "pursuit_ld_gain_s": c.pursuit_ld_gain_s, "pursuit_pd": c.pursuit_pd, "pursuit_predict_s": c.pursuit_predict_s, "pursuit_turn_in": c.pursuit_turn_in, "conf_slow_below": c.conf_slow_below, "steer_max_deg": c.steer_max_deg,
             "cam_height_m": self._model().cam_height_m, "cam_pitch_deg": self._model().cam_pitch_deg,
             "forward_pwm": int(round(self._model().pwm_full)),
             "single_line_stop_s": getattr(self.pilot, "single_line_stop_s", 0.0),
@@ -297,7 +298,7 @@ class Hub:
         if kid in ("kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd", "corner_blend_start", "corner_blend_full", "corner_exit_steer",
                    "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing",
                    "steering_rate_limit", "s_lo", "v_lo", "min_confidence", "lost_timeout_s", "ff_gain", "corner_margin",
-                   "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "steer_max_deg", "conf_slow_below"):
+                   "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "pursuit_turn_in", "steer_max_deg", "conf_slow_below"):
             setattr(c, kid, x)
         elif kid in ("cam_height_m", "cam_pitch_deg"):
             self.set_camera(**{kid: x})
@@ -390,10 +391,10 @@ class Hub:
         for pid, label, change, text in (
                 ("race", "Race", {}, f"The race values from line_config.py: straight {race.get('speed_straight', 0):.2f}, curve "
                  f"{race.get('speed_corner', 0):.2f} at motor PWM {race.get('forward_pwm', 407):.0f}, {law}, target {race.get('target_x_ratio', 0):.2f}. "
-                 "Real car, Nov 10: PWM 420, 11 laps 3.42-3.70 s (mean 3.59), 1 brief line loss. If it runs wide, press Safe race."),
+                 "Real car, Nov 10 night, fresh battery: 14 laps 3.52-3.84 s, no wide laps. If it runs wide, press Safe race; on a tired battery raise the curve throttle."),
                 ("safe", "Safe race", self.safe_speeds, f"Race steering at straight {self.safe_speeds.get('speed_straight', 0):.2f} / curve "
-                 f"{self.safe_speeds.get('speed_corner', 0):.2f} at motor PWM {self.safe_speeds.get('forward_pwm', 407):.0f}: real car, Nov 10: "
-                 "10 laps 3.67-3.81 s with no line losses. Use it if Race runs wide (low battery, different floor)."),
+                 f"{self.safe_speeds.get('speed_corner', 0):.2f} at motor PWM {self.safe_speeds.get('forward_pwm', 407):.0f}: one step slower in the curves "
+                 "than Race: real car, Nov 10 night, 7 laps 3.82-4.06 s. Use it if Race runs wide (fresh battery, different floor)."),
                 ("slow", "First slow lap", SLOW_LAP, "The race steering at 0.75 / 0.70 throttle (the speed the car has already "
                  "driven, and what the lap tuner climbs from). Use it for the first lap of the day, then press Race."),
                 ("pd", "PD fallback", PD_FALLBACK, "Switches pure pursuit off: PD steering as driven on the real car on Nov 9, "

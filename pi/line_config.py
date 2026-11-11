@@ -7,7 +7,9 @@ default from linetrack/config.py, which was tuned on real stage frames.
 """
 
 # --- What to follow ---------------------------------------------------------
-TARGET_X_RATIO = 0.40      # Nov 10 re-fit (camera 0.12 m / 15 deg): 0.38-0.40 passes every simulated variation; 0.42+ runs wide with delay.
+TARGET_X_RATIO = 0.35      # REAL Nov 10 night (fresh battery): 0.35 rides near the lane centre (0.40 = 9 cm from the inner line, whose
+                           # 0.54 m radius is the car's full-lock radius). 0.40 -> 32-41% of the time at full lock; 0.35 -> 13-24%.
+                           # 0.30 rides close to the outer line and loses the inner one more often.
                            # With PD steering (PURE_PURSUIT = False) use 0.40: PD cuts curves, and 0.46 put it on the left tape.
 # Camera orientation is already set by ~/mycar's CAMERA_HFLIP / CAMERA_VFLIP; do not flip frames again here.
 LOOKAHEAD_RATIO = 0.62     # row (fraction of image height) where the error is measured
@@ -25,8 +27,9 @@ KD = 0.4                   # was 0.25
 STRAIGHT_KP = 3.5
 CORNER_KP = 3.5            # 4.5 caused curve off-tracks in the simulator; steering is at full lock in curves anyway
 MAX_STEERING = 1.0         # HARD STANDARD: full left lock (PWM 450, ~18 deg fitted to recorded runs). At 0.8 the car lost the line 58% of frames in tight curves.
-STEERING_RATE_LIMIT = 6.0  # max change per second. Nov 10: 3.0 lost the line up to 9% at 1.00/0.92; 5-10 hold it (6 = smallest clean step)
-STEERING_SMOOTHING = 0.20  # EMA, 0 = none. 0.35 (the PD setting) lagged pure pursuit at curve entry in the simulator
+STEERING_RATE_LIMIT = 10.0 # max change per second. REAL Nov 10 night: at 6 the turn-in from +0.3 to full lock was rate-capped
+                           # (~0.3 per 19 Hz frame) and 2 of 10 laps ran wide (5.4-5.6 s); at 10 no wide laps in 14. Sim 3.0 lost the line.
+STEERING_SMOOTHING = 0.10  # EMA, 0 = none. Nov 10 night: 0.10 with rate 10 (was 0.20). 0.35 (the PD setting) lags pure pursuit at curve entry
 INVERT_STEERING = False    # if the lifted-wheels test is mirrored, flip THIS (never the PWM calibration)
 
 # --- Corner geometry (linetrack/geometry.py; backtest: tools/backtest_corner.py) ------
@@ -53,6 +56,9 @@ PURSUIT_LD_GAIN_S = 0.30   # extra lookahead per m/s (speed from SPEED_TABLE bel
 PURSUIT_PD = 0.10          # Nov 10: 0.10-0.15 ok, 0.05 and 0.25 fail. Share of KP/KD (3.5/0.4 -> 0.35/0.04) added on top of pure pursuit as image-space feedback.
                            # Pure pursuit aims through the camera ground model (pitch/height/FOV assumed); this PD term
                            # closes whatever offset a wrong model leaves.
+PURSUIT_TURN_IN = 0.0      # curve entry: pull steering toward the visible curve's own steering (0 = off). Sim 0.5 passes
+                           # (3.51 vs 3.54 s), 1.0 cuts deep inside. REAL Nov 10 night at 0.5: no gain (mean 3.61 vs 3.64 s, 4 blips vs 0):
+                           # the late turn-in comes from a weave on the straight, before the curve is visible.
 PURSUIT_PREDICT_S = 0.15   # racer-v2: delay compensation, aim from where the car will be this long after the frame (0 = off).
                            # Matches the ~150 ms command-to-motion lag in the Nov 8 logs. Sim at 1.00/0.92 --pairs: 0 -> 123 wide
                            # (4 pairs fail), 0.15 -> 60 (1 pair), 0.20 same, 0.30 worse. NOT YET DRIVEN: if it misbehaves, set 0.
@@ -122,22 +128,26 @@ SINGLE_LINE_STOP_S = 2.5
 SPEED_STRAIGHT = 0.75
 SPEED_TRANSITION = 0.75
 SPEED_CORNER = 0.70
-# RACE VALUES: REAL, Nov 10 afternoon, camera 0.15 m / 8 deg. This restores the setup from the 3:08 PM
-# commit, which was active before the ~3:30 PM video: PWM 407, 1.00 / 0.93 / 0.86. The later PWM 420
-# experiment ran faster on average, but this is the user's requested known-good video setup.
+# RACE VALUES: REAL, Nov 10 night, FRESHLY CHARGED battery (~7.6 V driving), camera 0.15 m / 8 deg, with target 0.35,
+# steering rate 10 and smoothing 0.10 above: PWM 407, 1.00 / 0.84 / 0.80, speed-up 1.0/s -> 14 laps 3.52-3.84 s, no wide laps.
+#   A full battery makes every PWM faster: the old Race (PWM 420, 1.00/0.69/0.64) lost the line in the first curve, and
+#   the afternoon video setup (PWM 407, 1.00/0.93/0.86) lost the line and ran wide. Curve 0.85 lost the line 9% of the
+#   time; 0.82 ran wide twice in 10 laps. Curve speed is the limit: the car is at full lock on the 0.54 m inner radius.
+#   On a tired battery the same throttle is slower: if laps get slow, raise the curve throttle a step at a time.
 # The dashboard's "Race" preset (it also sets the forward PWM; other presets use 407).
 RACE_FORWARD_PWM = 407
 RACE_SPEED_STRAIGHT = 1.00
-RACE_SPEED_TRANSITION = 0.93
-RACE_SPEED_CORNER = 0.86
-# SAFE RACE: 0.92 / 0.86. REAL Nov 10 evening: 10 laps 3.67-3.81 s, 0 line losses. The "Safe race" preset.
+RACE_SPEED_TRANSITION = 0.84
+RACE_SPEED_CORNER = 0.80
+# SAFE RACE: 0.92 / 0.80 / 0.76 at PWM 407. REAL Nov 10 night (fresh battery, same steering): 7 laps 3.82-4.06 s, no wide laps.
+# Don't go lower in the curves: 0.64 (PWM 394) is near where the motor barely moves, and laps took 5-6 s.
 SAFE_SPEED_STRAIGHT = 0.92
-SAFE_SPEED_TRANSITION = 0.89
-SAFE_SPEED_CORNER = 0.86
+SAFE_SPEED_TRANSITION = 0.80
+SAFE_SPEED_CORNER = 0.76
 SAFE_FORWARD_PWM = 407     # the speeds above were driven at PWM 407
 TUNE_RACE_FIRST = False    # False: "Start lap tuner" climbs from the speeds on the car. True: jump to the race values first.
 SPEED_RAMP_DOWN = 2.0
-SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend; restored with the 3:08 PM Race setup
+SPEED_RAMP_UP = 1.0      # throttle units / s when exiting a bend. 0.4 never reaches straight speed on the 0.7 m straights
 
 # --- Auto-tuner (dashboard "Auto-tune": start slow, fix gains, step speed up) ------
 AUTOTUNE_START = 0.70      # used only by the classic strategies; the lap tuner starts from the speed plan above

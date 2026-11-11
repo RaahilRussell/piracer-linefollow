@@ -84,11 +84,14 @@ class LapTimer:
         held for debounce_s (the lap clock still uses the moment the change began);
       - an impossible lap: if the changes add up before min_lap_s has passed, two of them were a
         flicker pair, so they are dropped and the lap keeps running.
+      - a curve the pilot could not fit: with the inner line out of view the section reads "unknown",
+        sometimes for the whole curve. Counted as a curve (on the straights both lines are in view), or
+        the timer sees straight -> straight and merges two laps into one.
     A lap far from the recent median (a missed or extra section) is kept but marked suspect and left
     out of the best lap. Also counts line losses per lap and laps cut short by a stop, so the race
     total can include the penalties they would cost."""
 
-    def __init__(self, sections_per_lap=4, race_laps=10, debounce_s=0.25, min_lap_s=2.0):
+    def __init__(self, sections_per_lap=4, race_laps=10, debounce_s=0.10, min_lap_s=2.0):
         self.sections_per_lap = int(sections_per_lap)
         self.race_laps = int(race_laps)
         self.debounce_s = float(debounce_s)
@@ -120,6 +123,8 @@ class LapTimer:
             self._lost_now = True
             return
         self._lost_now = False
+        if section == "unknown":
+            section = "corner"
         if section not in ("straight", "corner"):
             return
         if self._last_section is None:

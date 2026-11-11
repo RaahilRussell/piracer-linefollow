@@ -457,6 +457,14 @@ class LineFollowerPilot:
             self.pursuit_goal = None
         if pursuit is not None:
             # pure pursuit steers; PD on the lookahead row stays as a small correction
+            turn_in = min(1.0, max(0.0, getattr(self.cfg, "pursuit_turn_in", 0.0) or 0.0))
+            if k is not None and turn_in > 0 and abs(k) >= self.cfg.corner_blend_start:
+                # Curve entry: the inner edge leaves the image before the lookahead point, so pursuit aims at
+                # the start of the curve and turns in late. The fitted curvature already shows the bend: pull
+                # the command toward the steering that follows it, only ever further INTO the curve.
+                want = steer_for_curvature(self.model, k, max(1.0, self.cfg.steer_max_deg))
+                if (want < 0 and want < pursuit) or (want > 0 and want > pursuit):
+                    pursuit = pursuit + turn_in * (want - pursuit)
             ff, ff_scale = pursuit, 1.0
             gain_scale = min(1.0, max(0.0, self.cfg.pursuit_pd))
             if k is not None and gain_scale > 0:

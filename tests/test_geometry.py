@@ -182,6 +182,28 @@ class TestControllerAndPilot(unittest.TestCase):
         self.assertLess(thr, 1.0)                                        # slows for the corner
         self.assertGreaterEqual(thr, cfg.corner_min_throttle)            # never below the stall point
 
+    def test_turn_in_pulls_pursuit_into_a_visible_curve_only(self):
+        # Real Nov 10 night: pursuit still steered right (+0.1..+0.3) for ~0.3 s after the curvature fit showed
+        # the left curve, so the car turned in late and ran wide at full lock. Turn-in adds steering INTO the curve.
+        cfg, _ = load_line_config(line_config)
+        cfg.steering_smoothing, cfg.steering_rate_limit, cfg.pursuit_pd = 0.0, 100.0, 0.0
+        left = Bend(1.5, 1.8, 0.15, 0.35, 0.9, 10, 0.0)
+        out = {}
+        for ti in (0.0, 0.5):
+            cfg.pursuit_turn_in = ti
+            pilot = LineFollowerPilot(cfg, clock=lambda: 0.0)
+            pilot._pursuit = lambda path: 0.2                       # pursuit says: a little right
+            pilot.run("local_angle", cfg.target_x_ratio, True, 0.0, bend=left)
+            out[ti] = pilot.last_cmd.ff
+        self.assertAlmostEqual(out[0.0], 0.2)
+        self.assertLess(out[0.5], 0.0)                               # now turning left, into the curve
+        # already turning harder than the curve needs: left alone (never less turn)
+        cfg.pursuit_turn_in = 1.0
+        pilot = LineFollowerPilot(cfg, clock=lambda: 0.0)
+        pilot._pursuit = lambda path: -1.0
+        pilot.run("local_angle", cfg.target_x_ratio, True, 0.0, bend=left)
+        self.assertAlmostEqual(pilot.last_cmd.ff, -1.0)
+
     def test_speed_plan_uses_curvature_transition_and_slews(self):
         from donkey_part import SpeedPlan
         p = SpeedPlan(0.70, 0.50, transition=0.60, ramp_down=1.0, ramp_up=0.4)
@@ -302,7 +324,9 @@ class TestPurePursuit(unittest.TestCase):
         self.assertTrue(simdrive.build()[0].pure_pursuit)
         self.assertEqual((r["wide"], r["inside"]), (0, 0))
         self.assertGreaterEqual(r["laps"], 4)
-        self.assertLess(r["lap"], 4.2)    # simulated 4.0 s at 1.00 / 0.86; the real car did 3.54-3.77 s (Nov 10)
+        # Simulated 4.6 s at PWM 407, 1.00 / 0.80. The simulated speed table was measured on a tired battery; the real car
+        # on a fresh battery did 3.52-3.84 s with these values (Nov 10 night), so only guard against a big regression.
+        self.assertLess(r["lap"], 5.0)
 
 
 class TestRecorder(unittest.TestCase):

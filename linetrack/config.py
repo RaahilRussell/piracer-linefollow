@@ -105,6 +105,8 @@ class Config:
     pursuit_ld_gain_s: float = 0.0     # extra lookahead per m/s of (modelled) speed
     pursuit_pd: float = 0.3            # share of KP/KD kept as a correction on top of pure pursuit
     pursuit_predict_s: float = 0.0     # delay compensation: aim from where the car will be this many s after the frame (0 = off)
+    pursuit_turn_in: float = 0.0       # curve entry: pull steering this share of the way toward the visible curve's own
+                                       # steering when pure pursuit asks for less turn into it (never less; 0 = off)
 
     # --- Safety / timing ---
     min_confidence: float = 0.35

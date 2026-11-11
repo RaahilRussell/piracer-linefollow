@@ -433,6 +433,19 @@ class LapTimerCounts(unittest.TestCase):
                 timer.update(t, "local", sec, True)
         self.assertEqual([l["seconds"] for l in timer.laps], [4.0] * 4)
 
+    def test_a_curve_read_as_unknown_still_counts(self):
+        # Real Nov 10 night: with the inner line out of view a whole curve read "unknown"; the timer saw
+        # straight -> straight and reported two 3.6 s laps as one 7.2 s lap.
+        from lap_tuning import LapTimer
+        timer, t = LapTimer(sections_per_lap=4), 0.0
+        lap = list(self.LAP)
+        lap[60:80] = ["unknown"] * 20            # the second curve never gets a curvature fit
+        for _ in range(5):
+            for sec in lap:
+                t += .05
+                timer.update(t, "local", sec, True)
+        self.assertEqual([l["seconds"] for l in timer.laps], [4.0] * 4)
+
     def test_impossible_lap_time_is_rejected(self):
         from lap_tuning import LapTimer
         timer, t = LapTimer(sections_per_lap=4, debounce_s=0.0, min_lap_s=2.0), 0.0
@@ -668,5 +681,6 @@ class PresetsAndPage(unittest.TestCase):
         hub, lc, webui = self.hub()
         est = next(p for p in hub.presets() if p["id"] == "race")["estimate"]
         self.assertTrue(est["estimate"])
-        self.assertAlmostEqual(est["lap_s"], 3.6, delta=0.25)             # estimate at PWM 420, 1.00 / 0.64; real laps mean 3.59 s
+        # Estimate at PWM 407, 1.00 / 0.80 from the assumed (tired-battery) speed table. Real laps on a fresh battery: 3.52-3.84 s.
+        self.assertAlmostEqual(est["lap_s"], 4.8, delta=0.25)
         self.assertAlmostEqual(est["total_s"], 10 * est["lap_s"], delta=0.06)

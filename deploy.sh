@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 
 # EVERYTHING the car runs. Add a file here when drive_line.py starts importing it; --check proves the list is complete.
 PI_FILES=(donkey_part.py drive_line.py line_config.py webui.py dashboard.html laptuner.html tuning.py autotune.py
-          diagnose.py lap_tuning.py gain_schedule.json)
+          diagnose.py lap_tuning.py gain_schedule.json battery.py)
 LT_FILES=(linetrack/__init__.py linetrack/config.py linetrack/detector.py linetrack/controller.py linetrack/geometry.py)
 
 bundle() { COPYFILE_DISABLE=1 tar --no-xattrs -czf - -C pi "${PI_FILES[@]}" -C .. "${LT_FILES[@]}"; }

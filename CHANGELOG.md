@@ -8,6 +8,36 @@ Conventions:
 
 ---
 
+## Nov 10 night: fresh-battery Race values, faster steering, lap timer and deploy fixes
+
+A fully charged battery makes every PWM faster. The old Race (PWM 420, 1.00/0.69/0.64) lost the line in the first curve. The afternoon video setup (PWM 407, 1.00/0.93/0.86, restored in 57b6083) lost the line and ran wide. All results below are **real** unless marked sim. Lap times are counted from curve entries, because the lap timer was dropping laps (fixed below).
+
+**Defaults (`pi/line_config.py`):**
+
+| Setting | Was | Now | Evidence |
+|---|---|---|---|
+| Race | PWM 407, 1.00 / 0.93 / 0.86 | PWM 407, 1.00 / 0.84 / 0.80 | **real:** 14 laps, 3.49–3.84 s, no wide laps. Curve 0.82 ran wide in 2 of 10 laps; 0.85 lost the line 9% of the time. |
+| Safe race | 0.92 / 0.89 / 0.86 | 0.92 / 0.80 / 0.76 | **real:** 7 laps, 3.82–4.06 s. |
+| `SPEED_RAMP_UP` | 0.4 | 1.0 | 0.4 never reaches straight speed on the 0.7 m straights. |
+| `TARGET_X_RATIO` | 0.40 | 0.35 | Rides near the lane centre. 0.40 is 9 cm from the inner line, and that line's 0.54 m radius equals the car's full-lock radius: 32–41% of the time at full lock, vs 13–24% at 0.35. 0.30 loses the inner line more often. |
+| `STEERING_RATE_LIMIT` | 6 | 10 | At 6, the swing from +0.3 to full lock at curve entry was rate-capped (~0.3 per frame at 19 Hz), and 2 of 10 laps ran wide (5.4–5.6 s). |
+| `STEERING_SMOOTHING` | 0.20 | 0.10 | Set together with the rate limit; same evidence. |
+
+- **sim:** `race_eval --pairs` passes all 21 variations for Race (4.60 s) and Safe race (5.17 s). The simulator's speed table was measured on a tired battery, so the two tests that check lap time now allow for the slower simulated laps.
+- On a tired battery the same throttle is slower. If laps get slow, raise the curve throttle one step at a time. Don't go below about 0.76 in the curves: 0.64 (PWM 394) is close to where the motor barely moves, and laps took 5–6 s.
+
+**New slider, Curve turn-in (`pursuit_turn_in`, default 0 = off):** on curve entry, pulls the pure-pursuit steering toward what the visible curve needs, and only ever adds turn into the curve.
+- **sim:** 0.5 passes (3.51 vs 3.54 s); 1.0 cuts deep inside.
+- **real:** 0.5 gave no gain (mean 3.61 vs 3.64 s, 4 line-loss blips vs 0).
+- The late turn-in actually comes from a weave on the short straight. The car exits wide, pulls back past the line, and is still steering right when the next curve starts. At that point the curve isn't visible yet, so turn-in can't act on it. This is the next thing to fix.
+
+**Lap timer (`pi/lap_tuning.py`):**
+- **A curve read as "unknown" now counts as a curve.** With the inner line out of view, a whole curve can read "unknown". The timer then saw straight → straight and reported two 3.6 s laps as one 7.2 s lap.
+- **Debounce 0.25 → 0.10 s.** At race speed some straights last only 0.2–0.35 s.
+- **Replay of all 13 runs from tonight:** laps outside 3.0–4.6 s dropped from 17 of 86 to 2 of 97. The 2 s minimum-lap guard still throws out flicker pairs.
+
+**Deploy (`deploy.sh`):** `battery.py` (added in 57b6083) is now in the file list. Without it the Pi couldn't import it and the drive program wouldn't start.
+
 ## Nov 10 evening (3): race-day dashboard (`pi/laptuner.html`, served at `/`)
 
 The page was a long scroll: guide, timer, tuner, laps table, then the camera halfway down, then ~60 sliders. It's now a dark, minimal layout built around the camera.
