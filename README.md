@@ -1,6 +1,6 @@
 # PiRacer Pro Autonomous Racer
 
-![PiRacer camera view](docs/media/hero.jpg)
+![Annotated PiRacer camera view with detected track edge and Racing Line](docs/media/hero.jpg)
 
 An autonomous racing system for the Waveshare PiRacer Pro. It sees the orange race track through one fisheye camera, estimates track geometry, plans a moving Racing Line, and drives laps with pure pursuit, PD correction, speed planning, and safety guards.
 
@@ -22,13 +22,13 @@ On a straight, the planned path stays farther from the inside tape so the car ha
 
 The dashboard draws the planned line in magenta. If the lane width or curve shape cannot be trusted, the controller falls back to ordinary pursuit and reports why.
 
-![Recorded PiRacer camera frame](docs/media/camera-frame.jpg)
+![Annotated PiRacer camera frame with detected edges, target, and Racing Line](docs/media/camera-frame.jpg)
 
 ![Reconstructed track](docs/media/track.svg)
 
 ## See it drive
 
-![PiRacer camera sequence](docs/media/racing-preview.gif)
+![Annotated PiRacer camera sequence with live steering overlays](docs/media/racing-preview.gif)
 
 The original recorded frame sequences are under [`tests/frames/`](tests/frames/). They support detector, replay, calibration, and controller work.
 
