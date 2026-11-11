@@ -8,6 +8,14 @@ Conventions:
 
 ---
 
+## Nov 11: Restore the middle Racing Line profile; keep legacy Race isolated
+
+**Code/config change, not a new real-car validation:** Racing Line now starts with apex **−5 cm**, straight **17 cm**, throttle **1.00 / 0.94 / 0.90**, **PWM 407**, and an independent Racing Line-only steering-model setting of **13.4°**. The nominal 18° full-lock calibration remains unchanged in `steer_max_deg` and the simulator. These angles are controller settings, not new physical steering measurements.
+
+The previous dashboard **Race** preset had inadvertently inherited `racing_line=True` after Racing Line was promoted to the startup default. The Race, Safe Race, Slow and PD presets now force `racing_line=False`; Race also restores its earlier fresh-battery speeds of 1.00 / 0.84 / 0.80 at PWM 407. New regression tests cover model separation and presets. The older 13.3° / PWM 408 profile below is historical, and has been superseded in code; there is no verified physical run for this newly committed combination.
+
+---
+
 ## Nov 11: Racing Line promoted to the default
 
 The measured best profile is now the normal dashboard and Full Auto default, rather than a TEST/EXPERIMENT preset: racing line on, apex −4 cm, straight offset 16 cm, straight/transition/curve throttle 1.00/0.94/0.90, steering model 13.3°, and motor PWM 408. The same values are preserved in `BEST_MODEL_SETUP` and the Racing Line preset.
