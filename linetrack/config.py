@@ -97,6 +97,8 @@ class Config:
     # sim/profile.json's steer_angle_table must agree (tests/test_geometry.py checks it).
     # 18 deg is FITTED to the recorded runs (tools/calibrate_sim.py), not measured with a ruler.
     steer_max_deg: float = 18.0
+    # Controller-only tuning for Racing Line; nominal/legacy Race wheel angle stays 18 deg.
+    racing_steer_max_deg: float = 18.0
     # --- Pure pursuit (alternative steering law; False = PD on the lookahead row + feedforward) ---
     # Aim at the point of the ride line (tracked edge moved sideways by the target offset) that lies
     # pursuit_ld_m + pursuit_ld_gain_s * speed ahead: wheel angle = atan(2 * wheelbase * sin(alpha) / Ld).
