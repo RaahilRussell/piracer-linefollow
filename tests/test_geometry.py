@@ -192,7 +192,7 @@ class TestControllerAndPilot(unittest.TestCase):
         for ti in (0.0, 0.5):
             cfg.pursuit_turn_in = ti
             pilot = LineFollowerPilot(cfg, clock=lambda: 0.0)
-            pilot._pursuit = lambda path: 0.2                       # pursuit says: a little right
+            pilot._pursuit = lambda path, bend=None: 0.2             # pursuit says: a little right
             pilot.run("local_angle", cfg.target_x_ratio, True, 0.0, bend=left)
             out[ti] = pilot.last_cmd.ff
         self.assertAlmostEqual(out[0.0], 0.2)
@@ -200,7 +200,7 @@ class TestControllerAndPilot(unittest.TestCase):
         # already turning harder than the curve needs: left alone (never less turn)
         cfg.pursuit_turn_in = 1.0
         pilot = LineFollowerPilot(cfg, clock=lambda: 0.0)
-        pilot._pursuit = lambda path: -1.0
+        pilot._pursuit = lambda path, bend=None: -1.0
         pilot.run("local_angle", cfg.target_x_ratio, True, 0.0, bend=left)
         self.assertAlmostEqual(pilot.last_cmd.ff, -1.0)
 

@@ -11,7 +11,11 @@ analysis_runs/
 capture/
 runs/
 logs_sim/
-docs/
+# Keep curated documentation and README media in version control.
+docs/*
+!docs/
+!docs/media/
+!docs/media/**
 HANDOFF.md
 code_walkthrough.html
 *.log
