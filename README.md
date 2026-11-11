@@ -114,14 +114,14 @@ Replay checks the detector and steering decisions against previously recorded im
 
 ## Racing Line default
 
-The **Racing Line** is the dashboard's default physical setup. Pure pursuit moves a little out from the inside tape on the straights, then pulls in through each curve, following the proven saved profile. [Racing line](linetrack/racing_line.py)
+The **Racing Line** is the dashboard's default physical setup. Pure pursuit moves a little out from the inside tape on the straights, then pulls in through each curve. Its race-day middle profile uses an apex target of **−5 cm**, straight offset **17 cm**, throttle **1.00 / 0.94 / 0.90**, and **PWM 407**. Its **13.4° Racing Line steering model** is separate from the nominal **18°** steering model used by the older Race, Safe Race, Slow, and PD presets. [Racing line](linetrack/racing_line.py)
 
 - The planned line is magenta on the camera overlay.
 - It works from either orange line and never plans a curve tighter than the car's steering lock.
 - If the lane width or curve shape can't be read, ordinary pursuit steers and the dashboard says so.
 - Two sliders set how hard it cuts: **Curve distance from inside tape** and **Straight distance from inside tape**.
 
-The current saved profile is the baseline for Full Auto; Race remains available as a less aggressive rollback.
+Racing Line is the code's default Full Auto setup. **Race** is the separate older configuration (1.00 / 0.84 / 0.80 at PWM 407). A Pi-side `tuning.json` from an earlier deployment may need to be replaced by redeploying and verifying the effective dashboard settings; pushing code alone does not change the running Pi.
 
 ## Working on the car
 
