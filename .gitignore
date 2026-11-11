@@ -14,6 +14,7 @@ logs_sim/
 # Keep curated documentation and README media in version control.
 docs/*
 !docs/
+!docs/*.md
 !docs/media/
 !docs/media/**
 HANDOFF.md
