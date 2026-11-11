@@ -73,13 +73,22 @@ class TestKnobs(unittest.TestCase):
         for k, v in webui.RACING_LINE_SETUP.items():
             self.assertAlmostEqual(out[k], v, msg=k)
         self.assertTrue(cfg.racing_line and cfg.pure_pursuit)
+        self.assertAlmostEqual(cfg.racing_steer_max_deg, 13.4)
+        self.assertAlmostEqual(cfg.steer_max_deg, 18.0)
         self.assertAlmostEqual(cfg.racing_apex_m, webui.RACING_LINE_SETUP["racing_apex_m"])
         self.assertAlmostEqual(pilot.speed_plan.corner, webui.RACING_LINE_SETUP["speed_corner"])
         self.assertAlmostEqual(pilot.speed_plan.transition, webui.RACING_LINE_SETUP["speed_transition"])
         race = next(p for p in hub.presets() if p["id"] == "race")
-        self.assertEqual(race["values"]["racing_line"], 1)              # Racing Line is now the normal baseline
-        hub.apply_preset("race")                                        # Race keeps the default racing line enabled
-        self.assertTrue(cfg.racing_line)
+        self.assertEqual(race["values"]["racing_line"], 0)              # Legacy Race is NOT Racing Line
+        hub.apply_preset("race")
+        self.assertFalse(cfg.racing_line)
+        self.assertAlmostEqual(cfg.steer_max_deg, 18.0)                 # nominal legacy model unchanged
+        self.assertAlmostEqual(cfg.racing_steer_max_deg, 13.4)         # saved but inactive outside Racing Line
+        self.assertEqual((race["values"]["speed_transition"], race["values"]["speed_corner"],
+                          race["values"]["forward_pwm"]), (0.84, 0.80, 407))
+        for preset in hub.presets():
+            if preset["id"] in ("safe", "slow", "pd"):
+                self.assertEqual(preset["values"]["racing_line"], 0)
         self.assertAlmostEqual(hub.knob_values()["speed_corner"], race["values"]["speed_corner"])
         self.assertEqual(hub.knob_values()["forward_pwm"], race["values"]["forward_pwm"])
 
