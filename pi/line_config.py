@@ -122,17 +122,14 @@ SINGLE_LINE_STOP_S = 2.5
 SPEED_STRAIGHT = 0.75
 SPEED_TRANSITION = 0.75
 SPEED_CORNER = 0.70
-# RACE VALUES: REAL, Nov 10 evening, camera 0.15 m / 8 deg. Throttle is relative to RACE_FORWARD_PWM.
-#   PWM 420, 1.00 / 0.69 / 0.64, speed-up 1.0/s: 11 laps 3.42-3.70 s (mean 3.59), 1 brief line loss. Same battery
-#   session at PWM 407, 1.00 / 0.93 / 0.86: mean 3.77 s. Curve 0.64 at 420 = PWM 402 = curve 0.86 at 407: the curve
-#   PWM stays where it ran clean; only straights get faster.
-#   PWM 435 (same curve PWM): mean 3.59 s, more right-line backup and line losses: it arrives at curves too fast.
-#   At PWM 407, curve 0.88+ (PWM 403+) runs wide at full lock: curve speed is the real limit.
-# The dashboard's "Race" preset (it also sets the forward PWM; every other preset sets 407).
-RACE_FORWARD_PWM = 420
+# RACE VALUES: REAL, Nov 10 afternoon, camera 0.15 m / 8 deg. This restores the setup from the 3:08 PM
+# commit, which was active before the ~3:30 PM video: PWM 407, 1.00 / 0.93 / 0.86. The later PWM 420
+# experiment ran faster on average, but this is the user's requested known-good video setup.
+# The dashboard's "Race" preset (it also sets the forward PWM; other presets use 407).
+RACE_FORWARD_PWM = 407
 RACE_SPEED_STRAIGHT = 1.00
-RACE_SPEED_TRANSITION = 0.69
-RACE_SPEED_CORNER = 0.64
+RACE_SPEED_TRANSITION = 0.93
+RACE_SPEED_CORNER = 0.86
 # SAFE RACE: 0.92 / 0.86. REAL Nov 10 evening: 10 laps 3.67-3.81 s, 0 line losses. The "Safe race" preset.
 SAFE_SPEED_STRAIGHT = 0.92
 SAFE_SPEED_TRANSITION = 0.89
@@ -140,7 +137,7 @@ SAFE_SPEED_CORNER = 0.86
 SAFE_FORWARD_PWM = 407     # the speeds above were driven at PWM 407
 TUNE_RACE_FIRST = False    # False: "Start lap tuner" climbs from the speeds on the car. True: jump to the race values first.
 SPEED_RAMP_DOWN = 2.0
-SPEED_RAMP_UP = 1.0      # throttle units / s when exiting a bend. Nov 10: 0.4 never reached straight speed on the 0.7 m straights
+SPEED_RAMP_UP = 0.4      # throttle units / s when exiting a bend; restored with the 3:08 PM Race setup
 
 # --- Auto-tuner (dashboard "Auto-tune": start slow, fix gains, step speed up) ------
 AUTOTUNE_START = 0.70      # used only by the classic strategies; the lap tuner starts from the speed plan above
@@ -161,6 +158,14 @@ MAX_THROTTLE = 1.00        # hard cap for any pilot throttle (fixed or auto-craw
 # throttle part after donkeycar builds it, and the dashboard slider changes it live (hard limit 460).
 # Raising it makes EVERY throttle value faster (manual stick included): re-tune the speeds with it.
 THROTTLE_FORWARD_PWM = 407
+
+# --- Battery telemetry (PiRacer Pro onboard INA219) ------------------------------
+# Read asynchronously at 1 Hz so I2C monitoring cannot delay the steering loop.
+# Address 0x42 is the common PiRacer Pro INA219 address; the dashboard reports
+# unavailable if the sensor is absent or the board uses another address.
+BATTERY_I2C_BUS = 1
+BATTERY_I2C_ADDR = 0x42
+BATTERY_SAMPLE_S = 1.0
 
 # --- Top speed for EVERY mode (gamepad stick included) -----------------------
 # Final forward throttle sent to the motor is clipped to this (1.0 = the car's

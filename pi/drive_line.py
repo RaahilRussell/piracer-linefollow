@@ -38,6 +38,7 @@ from donkeycar.parts.pipe import Pipe  # noqa: E402
 from donkeycar.parts.throttle_filter import ThrottleFilter  # noqa: E402
 
 import line_config  # noqa: E402
+from battery import BatteryMonitor  # noqa: E402
 from donkey_part import (AutoCrawl, KillSwitch, LineDetectorPart, LineFollowerPilot, car_model,  # noqa: E402
                          LineRecorder, SpeedPlan, ThrottleCap, ThrottleMonitor, load_line_config,
                          make_throttle_cap)
@@ -70,6 +71,8 @@ def build_parts():
 def drive(use_joystick: bool, myconfig: str):
     cfg = dk.load_config(config_path=os.path.join(MYCAR, "config.py"), myconfig=myconfig)
     lcfg, extras, det, pilot = build_parts()
+    battery_monitor = BatteryMonitor(bus=extras["BATTERY_I2C_BUS"], address=extras["BATTERY_I2C_ADDR"],
+                                     interval_s=extras["BATTERY_SAMPLE_S"])
     print(f"[linefollow] target={lcfg.target_x_ratio} kp={lcfg.kp} kd={lcfg.kd} "
           f"pilot throttle={'AUTO_CRAWL ' + str(extras['CRAWL_START']) + '..' + str(extras['CRAWL_MAX']) if extras['AUTO_CRAWL'] else lcfg.throttle} "
           f"max speed: overall {extras['TOP_THROTTLE']} user {extras['MAX_USER']} pilot-steers {extras['MAX_PILOT_STEERS']} auto {extras['MAX_AUTO']} "
@@ -83,6 +86,7 @@ def drive(use_joystick: bool, myconfig: str):
                         tuning_path=os.path.join(HERE, "tuning.json"), log_dir=os.path.join(HERE, "logs"),
                         track_length_m=extras["TRACK_LENGTH_M"], track_curve_share=extras["TRACK_CURVE_SHARE"],
                         race_speeds=webui.race_speeds(extras), safe_speeds=webui.safe_speeds(extras))
+        hub.battery_monitor = battery_monitor
         hub.log("info", f"Program started (max speed: user {cap.limit('user'):.2f}, pilot steers "
                         f"{cap.limit('local_angle'):.2f}, full auto {cap.limit('local'):.2f})", "start")
         applied = hub.load_saved()
@@ -139,7 +143,7 @@ def drive(use_joystick: bool, myconfig: str):
         print(f"[linefollow] DASHBOARD: {url}", flush=True)
     V.add(webui.AutoMotionGuard(pilot), inputs=["user/mode", "throttle"], outputs=["throttle"])
     if extras["RECORD"]:
-        V.add(LineRecorder(os.path.join(HERE, "data"), det),
+        V.add(LineRecorder(os.path.join(HERE, "data"), det, battery_monitor=battery_monitor),
               inputs=["cam/image_array", "user/mode", "line/x_ratio", "line/found",
                       "line/frame_age", "steering", "throttle", "line/motion"],
               run_condition="run_pilot")
@@ -160,7 +164,12 @@ def drive(use_joystick: bool, myconfig: str):
     print(f"[linefollow] web UI: http://<pi-ip>:{cfg.WEB_CONTROL_PORT}   A = mode, Y = E-STOP, X = OFF (quit)", flush=True)
     if hasattr(ctr, "print_controls"):
         ctr.print_controls()
-    V.start(rate_hz=cfg.DRIVE_LOOP_HZ, max_loop_count=cfg.MAX_LOOPS)
+    if hub or extras["RECORD"]:
+        battery_monitor.start()
+    try:
+        V.start(rate_hz=cfg.DRIVE_LOOP_HZ, max_loop_count=cfg.MAX_LOOPS)
+    finally:
+        battery_monitor.stop()
 
 
 def check(frames_dir: str):

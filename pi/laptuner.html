@@ -70,7 +70,7 @@ main { padding: 16px max(16px, env(safe-area-inset-left)) 24px; display: flex; f
 .chip.straight { color: #7CC0FF; } .chip.corner { color: var(--tape); } .chip.lost { color: #fff; background: color-mix(in srgb, var(--red) 80%, transparent); }
 .hud-bottom {
   position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 18px 14px;
-  background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,0)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; pointer-events: none;
+  background: linear-gradient(to top, rgba(0,0,0,.78), rgba(0,0,0,0)); display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; pointer-events: none;
 }
 .hud-bottom .k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.6); }
 .hud-bottom .v { font-size: 22px; font-weight: 650; letter-spacing: -.01em; color: #fff; white-space: nowrap; }
@@ -252,6 +252,7 @@ details.grp.has-changed > summary .dirty { display: inline-block; }
       <div><div class="k">Throttle</div><div class="v num" id="hThr">—</div></div>
       <div><div class="k">Steering</div><div class="v num" id="hSteer">—</div><div class="steerbar"><i id="hSteerBar"></i></div></div>
       <div><div class="k">Curve radius</div><div class="v num" id="hCurv">—</div></div>
+      <div><div class="k">Battery</div><div class="v num" id="hBattery">—</div><div class="k" id="hBatterySub">Waiting for INA219</div></div>
     </div>
   </section>
 
@@ -577,6 +578,8 @@ function onTele(items) {
   const s = Math.max(-1, Math.min(1, t.steering || 0)), bar = $('hSteerBar');
   bar.style.width = (Math.abs(s) * 50) + '%'; bar.style.left = s < 0 ? (50 + s * 50) + '%' : '50%';
   $('hCurv').innerHTML = t.curv == null || Math.abs(t.curv) < 0.05 ? 'Straight' : `${fmt(1 / Math.abs(t.curv), 2)}<small>m ${t.curv > 0 ? 'left' : 'right'}</small>`;
+  $('hBattery').textContent = t.battery_available && t.battery_v != null ? `${fmt(t.battery_v, 2)} V` : '—';
+  $('hBatterySub').textContent = t.battery_available ? `sample ${fmt(t.battery_age_s, 1)}s ago` : 'INA219 unavailable';
 }
 function connect() {
   const es = new EventSource('/events?since=' + lastSeq);

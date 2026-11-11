@@ -50,7 +50,8 @@ _EXTRAS = {"RESET_AFTER_GAP_S": 0.3, "SHOW_OVERLAY": True, "TOP_THROTTLE": 0.35,
            # car model for corner geometry (linetrack/geometry.py); None = the model defaults
            "WHEELBASE_M": None, "STEER_MAX_DEG": None, "CAMERA_FOV_DEG": None, "CAM_HEIGHT_M": None,
            "CAM_PITCH_DEG": None, "CAM_FWD_M": None, "GRIP_MU": None, "BRAKE_DECEL": None,
-           "CONTROL_DELAY_S": None, "SPEED_TABLE": None}
+           "CONTROL_DELAY_S": None, "SPEED_TABLE": None,
+           "BATTERY_I2C_BUS": 1, "BATTERY_I2C_ADDR": 0x42, "BATTERY_SAMPLE_S": 1.0}
 
 
 def car_model(extras: dict | None = None) -> CarModel:
@@ -632,7 +633,7 @@ class LineRecorder:
     dashboard: python3 -m linetrack --source <folder>.
     """
 
-    def __init__(self, root: str, detector_part: LineDetectorPart, clock=time.time):
+    def __init__(self, root: str, detector_part: LineDetectorPart, clock=time.time, battery_monitor=None):
         import os
         self.os = os
         self.root = root
@@ -642,13 +643,14 @@ class LineRecorder:
         self.csv = None
         self.n = 0
         self.pilot = detector_part.pilot  # for status / P / D / crawl columns
+        self.battery_monitor = battery_monitor
 
     def _open(self):
         stamp = time.strftime("%Y%m%d-%H%M%S")
         self.dir = self.os.path.join(self.root, stamp)
         self.os.makedirs(self.dir, exist_ok=True)
         self.csv = open(self.os.path.join(self.dir, "log.csv"), "w", buffering=1)
-        self.csv.write("n,t,mode,found,source,conf,x_ratio,frame_age,angle,throttle,motion,"
+        self.csv.write("n,t,mode,found,source,conf,x_ratio,frame_age,angle,throttle,motion,battery_v,"
                        "status,error,p,d,both,single_stop,crawl_thr,curv,bend_near_m,ff,section,corner_weight,kp_used,kd_used,speed_target\n")
 
     def run(self, img_rgb, mode, x_ratio, found, frame_age, angle, throttle, motion=None):
@@ -663,8 +665,10 @@ class LineRecorder:
         cv2.imwrite(self.os.path.join(self.dir, name), cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR),
                     [cv2.IMWRITE_JPEG_QUALITY, 90])
         fmt = lambda v: "" if v is None else f"{v:.4f}"  # noqa: E731
+        battery = self.battery_monitor.snapshot() if self.battery_monitor is not None else {}
+        battery_v = battery.get("voltage_v") if battery.get("available") else None
         self.csv.write(f"{self.n},{self.clock():.3f},{mode},{int(bool(found))},{src},{conf:.3f},"
-                       f"{fmt(x_ratio)},{fmt(frame_age)},{fmt(angle)},{fmt(throttle)},{fmt(motion)},"
+                       f"{fmt(x_ratio)},{fmt(frame_age)},{fmt(angle)},{fmt(throttle)},{fmt(motion)},{fmt(battery_v)},"
                        f"{self._extra()}\n")
         self.n += 1
 

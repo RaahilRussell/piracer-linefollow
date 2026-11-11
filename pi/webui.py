@@ -151,6 +151,7 @@ class Hub:
         self.race_speeds = {k: float(v) for k, v in (race_speeds or {}).items() if v is not None}
         self.safe_speeds = {k: float(v) for k, v in (safe_speeds or {}).items() if v is not None}
         self.cfg, self.pilot, self.det, self.crawl, self.cap = cfg, pilot, det, crawl, cap
+        self.battery_monitor = None  # optional asynchronous INA219 reader; never drives throttle decisions
         self.data_dir = data_dir
         self.tuning_path = tuning_path
         self.clock = clock
@@ -1215,6 +1216,10 @@ class TelemetryPart:
             "throttle": None if throttle is None else round(float(throttle), 4),
             "web_driving": hub.web_drive() is not None,
         }
+        battery = hub.battery_monitor.snapshot() if hub.battery_monitor is not None else {}
+        tele["battery_v"] = battery.get("voltage_v") if battery.get("available") else None
+        tele["battery_age_s"] = battery.get("age_s")
+        tele["battery_available"] = bool(battery.get("available"))
         thr = tele["throttle"] or 0.0
         tele["pwm"] = round(370 + 37 * max(thr, 0.0), 1)
         self.n += 1
