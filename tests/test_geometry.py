@@ -300,6 +300,20 @@ class TestPurePursuit(unittest.TestCase):
         self.assertIsNone(pursuit_goal(self.edge(n=3), 0.10, 0.6))
         self.assertIsNone(pursuit_goal(np.zeros((0, 2)), 0.10, 0.6))
 
+    def test_racing_line_steering_refinement_does_not_change_legacy_pursuit(self):
+        cfg = Config(pure_pursuit=True, racing_line=True, steer_max_deg=18.0, racing_steer_max_deg=13.4,
+                     pursuit_ld_m=0.55, pursuit_ld_gain_s=0.0, pursuit_predict_s=0.0)
+        pilot = LineFollowerPilot(cfg)
+        lateral = GroundModel(pilot.model).lateral_at(cfg.lookahead_ratio, cfg.target_x_ratio)
+        path = (self.edge(radius=0.8, lateral=lateral), 'left', 0.47)
+        line_command = pilot._pursuit(path)
+        cfg.racing_line = False
+        race_command = pilot._pursuit(path)
+        self.assertIsNotNone(line_command)
+        self.assertIsNotNone(race_command)
+        self.assertAlmostEqual(line_command / race_command, 18.0 / 13.4, delta=0.06)
+        self.assertAlmostEqual(pilot._effective_steer_max_deg(), 18.0)
+
     def test_pilot_uses_pursuit_and_falls_back_to_pd_without_an_edge(self):
         cfg = Config(pure_pursuit=True, pursuit_pd=0.0, pursuit_ld_m=0.5, pursuit_ld_gain_s=0.0, kp=3.5, kd=0.0,
                      max_steering=1.0, steering_smoothing=0.0, steering_rate_limit=100.0, target_x_ratio=0.40)
