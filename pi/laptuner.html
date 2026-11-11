@@ -290,6 +290,7 @@ details.grp.has-changed > summary .dirty { display: inline-block; }
     <div class="sec-h">All settings · changes apply to the car immediately</div>
     <details class="grp" open><summary>Speed <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">0 = stopped, 1 = full throttle at the motor PWM below.</div><div id="gSpeed"></div></details>
     <details class="grp"><summary>Steering law <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">Pure pursuit aims at a point on the line ahead. Off = PD steering on one image row.</div><div id="gLaw"></div></details>
+    <details class="grp"><summary>Racing line <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">Default physical line: a little out on the straights, then toward the inside tape through the curves.</div><div id="gRacing"></div></details>
     <details class="grp"><summary>Curve handling <i class="dirty"></i><span class="count"></span></summary><div id="gCurve"></div></details>
     <details class="grp"><summary>PD steering <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">KP = how hard it steers back to the line. KD = how much it damps the wobble.</div><div id="gSteer"></div></details>
     <details class="grp"><summary>Lap timer <i class="dirty"></i><span class="count"></span></summary><div class="grp-note">No start line: a lap is counted from straight/curve changes.</div><div id="gTimer"></div></details>
@@ -417,6 +418,7 @@ const GROUPS = {
   gLaw: [['pure_pursuit', 'Pure pursuit'], ['pursuit_ld_m', 'Lookahead distance (m)'], ['pursuit_ld_gain_s', 'Extra lookahead per m/s'],
          ['pursuit_pd', 'PD share on top'], ['pursuit_predict_s', 'Delay compensation (s)'], ['pursuit_turn_in', 'Curve turn-in'], ['steer_max_deg', 'Full-lock wheel angle (deg)'],
          ['cam_height_m', 'Camera height (m)'], ['cam_pitch_deg', 'Camera tilt down (deg)']],
+  gRacing: [['racing_line', 'Racing Line mode'], ['racing_apex_m', 'Curve distance from inside tape (m)'], ['racing_straight_m', 'Straight distance from inside tape (m)'], ['racing_turn_in_m', 'Turn-in distance before the curve (m)']],
   gCurve: [['target_x_ratio', 'Line target position'], ['lookahead_ratio', 'Look-ahead row'], ['ff_gain', 'Curve feedforward (PD steering only)'],
            ['corner_blend_start', 'Curve starts at curvature'], ['corner_blend_full', 'Full curve at curvature'], ['corner_exit_steer', 'Curve exit hold'],
            ['corner_plan', 'Brake for curves ahead'], ['corner_margin', 'Curve speed margin']],

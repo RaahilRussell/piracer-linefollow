@@ -8,6 +8,71 @@ Conventions:
 
 ---
 
+## Nov 11: Racing Line promoted to the default
+
+The measured best profile is now the normal dashboard and Full Auto default, rather than a TEST/EXPERIMENT preset: racing line on, apex −4 cm, straight offset 16 cm, straight/transition/curve throttle 1.00/0.94/0.90, steering model 13.3°, and motor PWM 408. The same values are preserved in `BEST_MODEL_SETUP` and the Racing Line preset.
+
+Physical check before promotion: the independent clean 9-lap timing window averaged about 3.05 s/lap; in the latest 10 dashboard records, 9 had no logged tracking loss. The dashboard can detect camera tracking loss but cannot prove a chassis fully crossed a boundary line.
+
+---
+
+## Nov 11: Racing Line button hugs the inside tape (not deployed, **sim** only)
+
+**Racing Line** is a separate dashboard button. It only switches `RACING_LINE` on with pure pursuit; the saved **Race** values and speeds are untouched, so Race is the baseline and the rollback.
+
+**What it does (`linetrack/racing_line.py`).** Race rides a fixed distance from the inside tape, about 10 cm into the lane. Racing Line moves pure pursuit's ride line with the curve in view: 12 cm from the inside tape on the straights (`RACING_STRAIGHT_M`), sliding in to 3 cm through each curve (`RACING_APEX_M`). The simulated car ends up about 3 cm further in than it aims, so it straddles the tape, like the hand-driven laps on video. The lap is about 70% curve, so each centimetre closer to the tape is about 6 cm less lap.
+
+- It reuses the existing ride-line shift in `pursuit_goal`, so it works from either orange line and with the delay compensation.
+- The curve distance is raised wherever the inside tape is tighter than the car's full-lock radius.
+- The small PD correction now pulls toward the racing line instead of the fixed target.
+- If the lane width or the curve shape can't be read, ordinary pursuit steers and the dashboard logs why.
+- The planned line is magenta on the camera overlay (`geometry.ground_to_pixels`, new).
+- Sliders: **Curve distance from inside tape**, **Straight distance from inside tape**.
+- `deploy.sh` now ships `linetrack/racing_line.py`. Without it the drive program would not start on the Pi (`./deploy.sh --check` caught it).
+
+**It replaces the first version from earlier today**, which paired both tapes and planned an outside → apex → exit path. That one was slower than Race (4.67 vs 4.60 s) for two reasons, both measured in the simulator: it was active in only 38% of curve frames (the inside tape leaves the view, so the pair was "too short"), and when active it aimed at the far end of its path, which it had placed in the outer half of the lane. It rode 1 cm wider than Race. Its preset also broke `test_presets_only_use_real_knobs_and_race_is_line_config`; the suite is green again (242 tests, 2 skipped).
+
+**sim**, `race_eval --pairs`, 3 seeds × 30 s × 21 variations, PWM 407:
+
+| Straight / curve | Race | Racing Line | Old PD follower (target 0.40) |
+|---|---|---|---|
+| 1.00 / 0.80 | 4.60 s, pass | **4.20 s, pass** | 4.51 s, pass |
+| 1.00 / 0.90 | 3.87 s, pass | **3.50 s, pass** | not run |
+| 1.00 / 0.95 | 3.59 s, fails (69 wide) | 3.24 s, fails (60 wide, 4 deep inside) | not run |
+
+How deep it can cut (curve / straight distance, at 1.00 / 0.80):
+
+| Setting | Lap | Result |
+|---|---|---|
+| 0.04 / 0.12 | 4.22 s | pass |
+| **0.03 / 0.12** (default) | 4.20 s | pass |
+| 0.03 / 0.18 | 4.24 s | pass |
+| 0.02 / 0.12 | 4.17 s | fails: more than 10 cm past the tape with the camera 17 cm high or pitched 6° |
+| 0.00 / 0.12 | 4.10 s | fails in 3 variations (73 deep-inside events) |
+| −0.03 and below | no clean lap | loses the line |
+
+"Deep inside" is the car's centre more than 10 cm past the tape, which is where no wheel is on it any more.
+
+**First real laps (Nov 11, ~01:20, battery 7.65 V, deployed to the Pi).** All **real**, lap timer:
+
+| Racing Line setting (curve / straight distance) | PWM, straight / curve | Laps | Notes |
+|---|---|---|---|
+| 3 cm / 12 cm | 407, 0.75 / 0.70 | 12 laps, 4.46–5.01 s | 0 line losses, racing line steering 100% of the time, 19% at full lock |
+| 3 cm / 12 cm | 407, 1.00 / 0.80 | 10 laps, 3.36–3.85 s, mean 3.57 | 1 line loss, 46% at full lock, 7% on the right-line backup. Jack's Race at the same speeds, Nov 10: 3.49–3.84 s |
+| −3 cm / 18 cm | 420, 1.00 / 0.64 | 1 lap, 3.50 s | 2 line losses in that lap; stopped by the driver |
+
+The simulator's 9% gain did not show up: at Race speeds the steering is at full lock nearly half the time, so the car cannot hold the tighter line it is asked for.
+
+**The Racing Line button now sets everything itself** (`webui.RACING_LINE_SETUP`): curve −3 cm, straight 10 cm, PWM 420, 1.00 / 0.68 / 0.64. Before, it only switched the mode on, and pressing Race first reset the two distances, which wiped every live change during testing. These button values are the driver's call at the track and **have not been lapped**: −3 cm lost the line in the simulator and twice in its one real lap. Race undoes all of it.
+
+---
+
+## Nov 10 night: superseded fixed inside-line experiment
+
+This fixed-offset experiment was replaced on Nov 11 by the Racing Line mode above. It is retained here only as history; no Inside-line button remains.
+
+---
+
 ## Nov 10 night: fresh-battery Race values, faster steering, lap timer and deploy fixes
 
 A fully charged battery makes every PWM faster. The old Race (PWM 420, 1.00/0.69/0.64) lost the line in the first curve. The afternoon video setup (PWM 407, 1.00/0.93/0.86, restored in 57b6083) lost the line and ran wide. All results below are **real** unless marked sim. Lap times are counted from curve entries, because the lap timer was dropping laps (fixed below).

@@ -112,6 +112,17 @@ python3 tools/backtest.py --frames-dir runs/<run> --dt 0.05
 
 Replay checks the detector and steering decisions against previously recorded images. A different steering command would have changed the next image, so use closed-loop simulation to compare lap times and a physical trial to validate the model. The speed table, grip and camera mount are especially important measurements. [Calibration guide](sim/CALIBRATION.md)
 
+## Racing Line default
+
+The **Racing Line** is the dashboard's default physical setup. Pure pursuit moves a little out from the inside tape on the straights, then pulls in through each curve, following the proven saved profile. [Racing line](linetrack/racing_line.py)
+
+- The planned line is magenta on the camera overlay.
+- It works from either orange line and never plans a curve tighter than the car's steering lock.
+- If the lane width or curve shape can't be read, ordinary pursuit steers and the dashboard says so.
+- Two sliders set how hard it cuts: **Curve distance from inside tape** and **Straight distance from inside tape**.
+
+The current saved profile is the baseline for Full Auto; Race remains available as a less aggressive rollback.
+
 ## Working on the car
 
 `./car.sh status` reports the running program and installed version. Use `./car.sh restart` to install an update during a planned stop, `./car.sh log` to follow the output and `./car.sh stop` to quit. Deployment checks the exact bundle locally and refuses to install over a running drive program. The application lives in `~/linefollow` on the Pi. If a revision changes the defaults, incompatible saved tuning is moved aside so an old setting cannot silently override the new setup.

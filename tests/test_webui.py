@@ -66,6 +66,23 @@ class TestKnobs(unittest.TestCase):
         hub.apply({"auto_crawl": 1})
         self.assertIs(pilot.crawl, crawl)
 
+    def test_racing_line_preset_sets_its_own_values_and_race_undoes_them(self):
+        import webui
+        hub, cfg, pilot, *_ = make_hub()
+        out = hub.apply_preset("racing")
+        for k, v in webui.RACING_LINE_SETUP.items():
+            self.assertAlmostEqual(out[k], v, msg=k)
+        self.assertTrue(cfg.racing_line and cfg.pure_pursuit)
+        self.assertAlmostEqual(cfg.racing_apex_m, webui.RACING_LINE_SETUP["racing_apex_m"])
+        self.assertAlmostEqual(pilot.speed_plan.corner, webui.RACING_LINE_SETUP["speed_corner"])
+        self.assertAlmostEqual(pilot.speed_plan.transition, webui.RACING_LINE_SETUP["speed_transition"])
+        race = next(p for p in hub.presets() if p["id"] == "race")
+        self.assertEqual(race["values"]["racing_line"], 1)              # Racing Line is now the normal baseline
+        hub.apply_preset("race")                                        # Race keeps the default racing line enabled
+        self.assertTrue(cfg.racing_line)
+        self.assertAlmostEqual(hub.knob_values()["speed_corner"], race["values"]["speed_corner"])
+        self.assertEqual(hub.knob_values()["forward_pwm"], race["values"]["forward_pwm"])
+
     def test_save_load_revert(self):
         d = tempfile.mkdtemp()
         try:
