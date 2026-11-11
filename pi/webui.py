@@ -64,6 +64,7 @@ KNOBS = [
     ("steer_max_deg", "Steering law", "Full-lock wheel angle (deg)", 10.0, 30.0, 0.5, "Wheel angle at full steering. 18 is fitted to recorded runs, not measured. Used by pure pursuit and feedforward; the simulator uses the same value."),
     ("pursuit_predict_s", "Steering law", "Delay compensation (s)", 0.0, 0.3, 0.01, "Pure pursuit aims from where the car will be this long after the camera frame (it keeps moving while the frame is processed and the servo turns). 0 = off. Logs suggest about 0.15 s from command to motion."),
     ("pursuit_turn_in", "Steering law", "Curve turn-in", 0.0, 1.0, 0.05, "On curve entry, pull steering this share of the way toward what the visible curve needs, when pure pursuit is turning in less (it aims at where the inner line leaves the image, so it turns in late). Only ever adds turn into the curve. 0 = off."),
+    ("racing_steer_max_deg", "Racing line", "Racing Line steering model (deg)", 10.0, 30.0, 0.1, "Only used when Racing Line mode is enabled. Middle profile: 13.4 deg. Legacy Race stays on the nominal 18 deg steering model."),
     ("racing_line", "Racing line", "Racing Line mode", 0, 1, 1, "Default physical racing line: pure pursuit stays a little wide on the straights, then cuts toward the inside tape through each curve. Works from either orange line."),
     ("racing_apex_m", "Racing line", "Curve distance from inside tape (m)", -0.25, 0.15, 0.005, "Where the car's centre aims in a curve, measured from the inside tape's lane-side edge. Lower = cuts in more = shorter lap. The simulated car ends up about 3 cm further in than this, so 0 already straddles the tape and below 0 it loses the line. 0.07 = inner wheels on the tape edge. Raise it if the car loses the inside line."),
     ("racing_straight_m", "Racing line", "Straight distance from inside tape (m)", -0.05, 0.25, 0.005, "The same distance on the straights. A little wider than the curve distance opens the turn, so the steering is not pinned at full lock. Lower = shorter path but more time at full lock."),
@@ -120,7 +121,7 @@ RACE_KEYS = ("speed_straight", "speed_corner", "speed_transition", "speed_ramp_d
              "kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd",
              "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing", "steering_rate_limit",
              "ff_gain", "pure_pursuit", "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "pursuit_turn_in", "steer_max_deg", "conf_slow_below",
-             "racing_line", "racing_apex_m", "racing_straight_m", "racing_turn_in_m",
+             "racing_line", "racing_steer_max_deg", "racing_apex_m", "racing_straight_m", "racing_turn_in_m",
              "corner_blend_start", "corner_blend_full", "corner_exit_steer", "corner_plan",
              "lost_hold_heading", "coast_s", "slow_s", "max_auto", "top_throttle", "forward_pwm")
 # Changes each preset makes to the race values.
@@ -224,7 +225,7 @@ class Hub:
             "ff_gain": c.ff_gain, "corner_plan": int(bool(c.corner_plan)), "corner_margin": c.corner_margin,
             "pure_pursuit": int(bool(c.pure_pursuit)), "pursuit_ld_m": c.pursuit_ld_m,
             "pursuit_ld_gain_s": c.pursuit_ld_gain_s, "pursuit_pd": c.pursuit_pd, "pursuit_predict_s": c.pursuit_predict_s, "pursuit_turn_in": c.pursuit_turn_in, "conf_slow_below": c.conf_slow_below, "steer_max_deg": c.steer_max_deg,
-            "racing_line": int(bool(c.racing_line)), "racing_apex_m": c.racing_apex_m, "racing_turn_in_m": c.racing_turn_in_m, "racing_straight_m": c.racing_straight_m,
+            "racing_line": int(bool(c.racing_line)), "racing_steer_max_deg": c.racing_steer_max_deg, "racing_apex_m": c.racing_apex_m, "racing_turn_in_m": c.racing_turn_in_m, "racing_straight_m": c.racing_straight_m,
             "cam_height_m": self._model().cam_height_m, "cam_pitch_deg": self._model().cam_pitch_deg,
             "forward_pwm": int(round(self._model().pwm_full)),
             "single_line_stop_s": getattr(self.pilot, "single_line_stop_s", 0.0),
@@ -309,7 +310,7 @@ class Hub:
         if kid in ("kp", "kd", "straight_kp", "straight_kd", "corner_kp", "corner_kd", "corner_blend_start", "corner_blend_full", "corner_exit_steer",
                    "target_x_ratio", "lookahead_ratio", "max_steering", "steering_smoothing",
                    "steering_rate_limit", "s_lo", "v_lo", "min_confidence", "lost_timeout_s", "ff_gain", "corner_margin",
-                   "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "pursuit_turn_in", "steer_max_deg", "conf_slow_below", "racing_apex_m", "racing_straight_m", "racing_turn_in_m"):
+                   "pursuit_ld_m", "pursuit_ld_gain_s", "pursuit_pd", "pursuit_predict_s", "pursuit_turn_in", "steer_max_deg", "racing_steer_max_deg", "conf_slow_below", "racing_apex_m", "racing_straight_m", "racing_turn_in_m"):
             setattr(c, kid, x)
         elif kid in ("cam_height_m", "cam_pitch_deg"):
             self.set_camera(**{kid: x})
@@ -397,6 +398,8 @@ class Hub:
         with), so the page holds no tuning numbers of its own."""
         race = {k: self.defaults[k] for k in RACE_KEYS if k in self.defaults}
         race.update(self.race_speeds)
+        # Previous Race / Safe / Slow / PD modes must not inherit the Racing Line default.
+        race["racing_line"] = 0
         law = "pure pursuit" if race.get("pure_pursuit") else "PD steering"
         out = []
         for pid, label, change, text in (
@@ -407,7 +410,7 @@ class Hub:
                  f"Default racing line: hugs the inside tape (magenta line on the camera). Curves {RACING_LINE_SETUP['racing_apex_m'] * 100:.0f} cm from the "
                  f"inside tape's edge (negative = over it), straights {RACING_LINE_SETUP['racing_straight_m'] * 100:.0f} cm, motor PWM "
                  f"{RACING_LINE_SETUP['forward_pwm']}, straight {RACING_LINE_SETUP['speed_straight']:.2f} / curve {RACING_LINE_SETUP['speed_corner']:.2f}. "
-                 "Sets everything itself: no need to press Race first. Real car, Nov 11: 8 laps 3.15-3.28 s, no line losses. "
+                 "Sets everything itself: no need to press Race first. Uses the 13.4 deg middle-profile steering tune ONLY in Racing Line. "
                  "If it loses the inside line, raise Curve distance from inside tape; Race is the rollback."),
                 ("safe", "Safe race", self.safe_speeds, f"Race steering at straight {self.safe_speeds.get('speed_straight', 0):.2f} / curve "
                  f"{self.safe_speeds.get('speed_corner', 0):.2f} at motor PWM {self.safe_speeds.get('forward_pwm', 407):.0f}: one step slower in the curves "
