@@ -67,6 +67,15 @@ class TestKnobs(unittest.TestCase):
         hub.apply({"auto_crawl": 1})
         self.assertIs(pilot.crawl, crawl)
 
+    def test_hardware_test_refuses_motion_and_does_not_change_settings(self):
+        hub, cfg, pilot, crawl, cap = make_hub()
+        before = hub.knob_values()
+        hub.telemetry = {"mode": "local"}
+        with self.assertRaisesRegex(RuntimeError, "Manual"):
+            hub.start_hardware_test()
+        self.assertEqual(hub.knob_values(), before)
+        self.assertEqual(hub.hardware_test_status()["state"], "idle")
+
     def test_racing_line_preset_sets_its_own_values_and_race_undoes_them(self):
         import webui
         hub, cfg, pilot, *_ = make_hub()

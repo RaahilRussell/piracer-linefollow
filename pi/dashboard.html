@@ -123,6 +123,14 @@ h3 { font-size: 12px; font-weight: 600; margin: 0; color: var(--secondary); }
 .badge.info, .badge.plain { color: var(--secondary); background: var(--fill); }
 .badge.sim { color: var(--sim); background: color-mix(in srgb, var(--sim) 13%, transparent); }
 .badge.plain::before { display: none; }
+.test-tab { color: var(--bad) !important; font-weight: 800; letter-spacing: .03em; }
+.test-warning { border: 2px solid var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--card)); }
+.test-warning h1 { color: var(--bad); }
+.test-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.test-result { padding: 10px 12px; border-radius: 8px; background: var(--surface); }
+.test-result b { display: block; font: 600 17px var(--mono); }
+.test-result span { color: var(--secondary); font-size: 12px; }
+.test-output { max-height: 260px; overflow: auto; white-space: pre-wrap; font: 12px var(--mono); background: var(--surface); padding: 10px; border-radius: 8px; }
 
 /* camera + lane gauge */
 .video { width: 100%; aspect-ratio: 240 / 192; background: #000; border-radius: 8px; object-fit: contain; display: block; }
@@ -341,6 +349,7 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
       <a href="#tune" data-view="tune">Tune</a>
       <a href="#simulator" data-view="simulator">Simulator</a>
       <a href="#runs" data-view="runs">Runs</a>
+      <a href="#hardware-test" data-view="hardware-test" class="test-tab">⚠ HARDWARE TEST</a>
     </nav>
     <span class="flex"></span>
     <div class="seg modes" id="modeSeg" role="group" aria-label="Drive mode">
@@ -458,6 +467,22 @@ input[type=range].scrub { flex: 1; min-width: 160px; accent-color: var(--ink); }
         <div><b>Line lost, confidence high</b>Running wide: too fast, or KP too low.</div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- ============================ HARDWARE TEST ============================ -->
+<section class="view" id="view-hardware-test" hidden>
+  <div class="card test-warning">
+    <div class="card-h"><div><h1>⚠ HARDWARE TEST · READ-ONLY</h1><p>This is an experiment tab, not a racing mode.</p></div><span class="badge bad">NO MOTOR COMMANDS</span></div>
+    <p class="note">Runs for about 5 seconds while stopped. It measures the existing camera/control pipeline, lists available camera modes, checks image-work overhead, samples battery telemetry, and verifies every tuning value stayed unchanged. It does not start Full Auto, change settings, save tuning, or alter the default Racing Line profile.</p>
+    <div class="row"><button class="btn danger" id="btnHardwareTest">Run hardware test</button><span class="badge plain" id="hardwareTestState">Not run</span></div>
+    <p class="note" id="hardwareTestNote">Select Manual and release the web joystick first. Keep the car physically stopped.</p>
+  </div>
+  <div class="card" id="hardwareTestResults" hidden>
+    <div class="card-h"><h2>Measured results</h2><span class="badge plain" id="hardwareTestSafety"></span></div>
+    <div class="test-results" id="hardwareTestMetrics"></div>
+    <h3>Camera modes</h3><pre class="test-output" id="hardwareCameraModes"></pre>
+    <p class="note" id="hardwareTestDetails"></p>
   </div>
 </section>
 
@@ -617,7 +642,7 @@ async function api(path, body) {
 const view = () => { const v = (location.hash || '#drive').slice(1); return v === 'tune' ? 'laptune' : v === 'diagnose' ? 'drive' : v; };
 
 /* ---------------- routing ---------------- */
-const VIEWS = ['drive', 'diagnose', 'tune', 'laptune', 'simulator', 'runs'];
+const VIEWS = ['drive', 'diagnose', 'tune', 'laptune', 'simulator', 'runs', 'hardware-test'];
 function route() {
   const v = VIEWS.includes(view()) ? view() : 'drive';
   VIEWS.forEach(n => { $('view-' + n).hidden = n !== v; });
@@ -627,10 +652,47 @@ function route() {
   if (v === 'tune') { renderTuneProfiles(); schedulePreview(); }
   if (v === 'laptune') syncLapSpeed();
   if (v === 'simulator') simEnter();
+  if (v === 'hardware-test') pollHardwareTest();
   if (window.syncLapCamera) window.syncLapCamera();
   drawLive();
 }
 addEventListener('hashchange', route);
+
+/* ---------------- read-only hardware test ---------------- */
+let hardwareTestTimer = null;
+function showHardwareTest(job) {
+  const state = job?.state || 'idle';
+  const label = state === 'running' ? 'Running · car must remain stopped' : state === 'done' ? 'Complete' : state === 'failed' ? 'Failed' : 'Not run';
+  $('hardwareTestState').textContent = label;
+  $('btnHardwareTest').disabled = state === 'running';
+  $('hardwareTestResults').hidden = !job?.result;
+  if (state === 'running') $('hardwareTestNote').textContent = 'Measuring for about 5 seconds. No tuning or motor command is being sent.';
+  if (job?.error) $('hardwareTestNote').textContent = job.error;
+  const r = job?.result; if (!r) return;
+  $('hardwareTestSafety').textContent = r.safe ? 'Settings unchanged' : 'Review warning';
+  $('hardwareTestSafety').className = 'badge ' + (r.safe ? 'ok' : 'bad');
+  const vals = [
+    ['Loop', r.loop_hz_median == null ? '—' : `${r.loop_hz_median} Hz`, 'reported control-loop rate'],
+    ['Detector', r.detector_ms_median == null ? '—' : `${r.detector_ms_median} ms`, 'median line-processing time'],
+    ['Overlay', r.overlay_ms_median == null ? '—' : `${r.overlay_ms_median} ms`, 'median drawing time'],
+    ['JPEG', r.jpeg_ms_median == null ? '—' : `${r.jpeg_ms_median} ms`, 'median preview encoding time'],
+    ['Tracking', r.tracking_pct == null ? '—' : `${r.tracking_pct}%`, 'frames with a line found'],
+    ['Battery', r.battery_available ? `${r.battery_v_min}–${r.battery_v_max} V` : 'Unavailable', 'cached INA219 samples'],
+  ];
+  $('hardwareTestMetrics').innerHTML = vals.map(v => `<div class="test-result"><b>${esc(v[1])}</b><span>${esc(v[0])} · ${esc(v[2])}</span></div>`).join('');
+  const cm = r.camera_modes || {};
+  $('hardwareCameraModes').textContent = cm.output || (cm.attempts || []).map(x => `${x.command}: ${x.output}`).join('\n') || 'No camera mode information returned.';
+  $('hardwareTestDetails').textContent = (r.warning || '') + (r.samples ? ` Samples: ${r.samples}. Fresh frames: ${r.fresh_frames}.` : '');
+}
+async function pollHardwareTest() {
+  try { showHardwareTest(await api('/api/hardware-test')); } catch (e) { $('hardwareTestNote').textContent = e.message; }
+  clearTimeout(hardwareTestTimer);
+  if (view() === 'hardware-test') hardwareTestTimer = setTimeout(pollHardwareTest, 700);
+}
+$('btnHardwareTest').onclick = async () => {
+  try { showHardwareTest(await api('/api/hardware-test', {})); toast('Read-only hardware test started'); }
+  catch (e) { toast('Test not started: ' + e.message); }
+};
 
 /* ---------------- data source (never claim "live" unless it's the car) ---------------- */
 let src = { source: null, live: false, fresh: false, sim_available: false };

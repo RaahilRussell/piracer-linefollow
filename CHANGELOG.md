@@ -8,6 +8,12 @@ Conventions:
 
 ---
 
+## Nov 11: Read-only hardware test tab
+
+Added an unmistakable **HARDWARE TEST** dashboard tab. It refuses to run while the car is in Pilot Steers, Full Auto, or under web throttle; samples the existing camera/control pipeline, reports loop rate, detector/overlay/JPEG timing, tracking, battery telemetry, and camera modes, and verifies the tuning snapshot is unchanged. It never applies knobs, saves tuning, changes mode, or sends a motor command.
+
+---
+
 ## Nov 11: Restore the middle Racing Line profile; keep legacy Race isolated
 
 **Code/config change, not a new real-car validation:** Racing Line now starts with apex **−5 cm**, straight **17 cm**, throttle **1.00 / 0.94 / 0.90**, **PWM 407**, and an independent Racing Line-only steering-model setting of **13.4°**. The nominal 18° full-lock calibration remains unchanged in `steer_max_deg` and the simulator. These angles are controller settings, not new physical steering measurements.

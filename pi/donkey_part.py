@@ -115,6 +115,7 @@ class LineDetectorPart:
         self._t_new = None
         self._det = None
         self.proc_ms = 0.0
+        self.overlay_ms = 0.0
         self._small = None
         self.motion = None   # camera motion score: ~0.9 still, ~2.5+ rolling, ~17 normal driving
 
@@ -144,7 +145,9 @@ class LineDetectorPart:
             self._small = small
         det = self._det
         age = now - self._t_new
+        t_overlay = time.perf_counter()
         overlay = self.draw(img_rgb, det, age) if self.show_overlay else img_rgb
+        self.overlay_ms = (time.perf_counter() - t_overlay) * 1000
         x = det.x_ratio if det.found else None
         return x, bool(det.found), age, overlay, self.motion, self.identity_sure()
 

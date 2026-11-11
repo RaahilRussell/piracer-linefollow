@@ -175,6 +175,7 @@ class Hub:
         self.history: list = []          # last ~10 s of telemetry for late-joining pages
         self.jpeg: bytes | None = None
         self.jpeg_seq = 0
+        self.hardware_test = {"state": "idle", "result": None, "error": None}
         # commands from the web
         self.pending_mode: str | None = None
         self.drive = {"steering": 0.0, "throttle": 0.0, "t": -1e9}
@@ -637,6 +638,88 @@ class Hub:
         if not host:
             raise ValueError("Enter the Pi's current IP address first")
         return self.recording_review.start(host, knobs, deep=body.get("deep", True))
+
+    # ------------------------------------------------------------ read-only hardware test
+    def hardware_test_status(self) -> dict:
+        with self.lock:
+            return json.loads(json.dumps(self.hardware_test))
+
+    def start_hardware_test(self) -> dict:
+        """Start read-only Pi checks; never changes tuning or sends a motor command."""
+        with self.lock:
+            mode = self.telemetry.get("mode")
+            web_throttle = float(self.drive.get("throttle", 0.0) or 0.0)
+            if mode in ("local", "local_angle") or abs(web_throttle) > 1e-6:
+                raise RuntimeError("Select Manual and release the web joystick before running the hardware test")
+            if self.hardware_test.get("state") == "running":
+                return dict(self.hardware_test)
+            baseline = self.knob_values()
+            self.hardware_test = {"state": "running", "started": time.time(), "result": None, "error": None}
+        threading.Thread(target=self._run_hardware_test, args=(baseline,), name="hardware-test", daemon=True).start()
+        return self.hardware_test_status()
+
+    @staticmethod
+    def _camera_modes() -> dict:
+        """List camera modes without starting a preview or changing camera settings."""
+        attempts = []
+        for exe in ("rpicam-hello", "libcamera-hello"):
+            try:
+                p = subprocess.run([exe, "--list-cameras"], capture_output=True, text=True, timeout=8)
+                out = (p.stdout + p.stderr).strip()
+                attempts.append({"command": exe, "returncode": p.returncode, "output": out[-6000:]})
+                if p.returncode == 0 and out:
+                    return {"available": True, "command": exe, "output": out[-6000:]}
+            except FileNotFoundError:
+                attempts.append({"command": exe, "available": False, "output": "not installed"})
+            except Exception as e:
+                attempts.append({"command": exe, "available": False, "output": f"{type(e).__name__}: {e}"})
+        return {"available": False, "attempts": attempts, "output": "Camera mode listing unavailable"}
+
+    def _run_hardware_test(self, baseline: dict):
+        started = time.monotonic()
+        samples = []
+        try:
+            while time.monotonic() - started < 5.0:
+                with self.lock:
+                    samples.append(dict(self.telemetry))
+                time.sleep(0.10)
+            with self.lock:
+                after = self.knob_values()
+            keys = sorted(set(baseline) | set(after))
+            unchanged = all(baseline.get(k) == after.get(k) for k in keys)
+
+            def nums(key):
+                return [float(t[key]) for t in samples if isinstance(t.get(key), (int, float))]
+
+            hz, proc, overlay, jpeg, battery = (nums(k) for k in ("hz", "proc_ms", "overlay_ms", "jpeg_ms", "battery_v"))
+            found = [t for t in samples if "found" in t]
+            result = {
+                "safe": unchanged,
+                "settings_unchanged": unchanged,
+                "samples": len(samples),
+                "loop_hz_median": round(float(np.median(hz)), 2) if hz else None,
+                "detector_ms_median": round(float(np.median(proc)), 2) if proc else None,
+                "overlay_ms_median": round(float(np.median(overlay)), 2) if overlay else None,
+                "jpeg_ms_median": round(float(np.median(jpeg)), 2) if jpeg else None,
+                "tracking_pct": round(100 * sum(bool(t.get("found")) for t in found) / len(found), 1) if found else None,
+                "fresh_frames": sum(t.get("status") != "STALE" for t in samples) if samples else 0,
+                "battery_available": any(t.get("battery_available") for t in samples),
+                "battery_v_min": round(min(battery), 3) if battery else None,
+                "battery_v_max": round(max(battery), 3) if battery else None,
+                "camera_modes": self._camera_modes(),
+            }
+            if not samples:
+                result["safe"] = False
+                result["warning"] = "No live telemetry arrived; the Pi or drive program may be offline"
+            elif not unchanged:
+                result["safe"] = False
+                result["warning"] = "Settings changed during the test; do not use this result"
+            with self.lock:
+                self.hardware_test = {"state": "done", "finished": time.time(), "result": result, "error": None}
+        except Exception as e:
+            with self.lock:
+                self.hardware_test = {"state": "failed", "finished": time.time(), "result": None,
+                                      "error": f"{type(e).__name__}: {e}"}
 
     def status(self) -> dict:
         """Where the data comes from and whether it's fresh. 'live' only for the real car."""
@@ -1278,7 +1361,10 @@ class TelemetryPart:
             self._watch(tele, now)
         except Exception as e:  # the log must never stop the car loop
             tele["watch_error"] = str(e)
+        t_jpeg = time.perf_counter()
         jpeg = jpeg_of(overlay) if (self.n % self.jpeg_every == 0) else None
+        tele["overlay_ms"] = round(float(getattr(det, "overlay_ms", 0.0)), 3)
+        tele["jpeg_ms"] = round((time.perf_counter() - t_jpeg) * 1000, 3)
         hub.publish(tele, jpeg)
 
 
@@ -1338,6 +1424,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(hub.list_runs())
             if p == "/api/status":
                 return self._json(hub.status())
+            if p == "/api/hardware-test":
+                return self._json(hub.hardware_test_status())
             if p == "/api/review":
                 return self._json(hub.review_status())
             if p == "/api/diagnose":
@@ -1427,6 +1515,8 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/autotune":
                 return self._json(hub.autotune(body.get("action"), body.get("ceiling"), body.get("strategy"),
                                                body.get("speed"), body.get("step")))
+            if p == "/api/hardware-test":
+                return self._json(hub.start_hardware_test())
             if p == "/api/poweroff":
                 hub.poweroff()
                 return self._json({"ok": True})
