@@ -222,6 +222,14 @@ details.grp.has-changed > summary .dirty { display: inline-block; }
   background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 550;
   transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100vw - 32px); }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+.test-tab { color: var(--red) !important; font-weight: 800; }
+.test-warning { border: 2px solid var(--red); background: color-mix(in srgb, var(--red) 7%, var(--panel)); padding: 12px; border-radius: 10px; }
+.test-warning h3 { color: var(--red); margin: 0 0 5px; }
+.test-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.test-metric { padding: 8px; border-radius: 7px; background: var(--bg); }
+.test-metric b { display: block; font: 600 15px var(--mono); }
+.test-metric span { color: var(--muted); font-size: 11px; }
+.test-output { max-height: 190px; overflow: auto; white-space: pre-wrap; font: 11px var(--mono); background: var(--bg); padding: 8px; border-radius: 7px; }
 </style>
 </head>
 <body>
@@ -235,6 +243,7 @@ details.grp.has-changed > summary .dirty { display: inline-block; }
     <button data-mode="local" aria-pressed="false">Full Auto</button>
   </div>
   <button class="stop" id="stop" title="Stop (Space)">STOP</button>
+  <button class="icon-btn test-tab" id="testTab" title="Read-only hardware test">⚠ TEST</button>
   <button class="icon-btn" id="menuBtn" aria-controls="drawer" aria-expanded="false" title="Settings">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
     <span>Settings</span><i class="badge" id="unsavedBadge" hidden></i>
@@ -281,6 +290,7 @@ details.grp.has-changed > summary .dirty { display: inline-block; }
     <button role="tab" data-tab="tTuner" aria-selected="false">Lap tuner</button>
     <button role="tab" data-tab="tLog" aria-selected="false">Activity</button>
     <button role="tab" data-tab="tGuide" aria-selected="false">Guide</button>
+    <button role="tab" data-tab="tHardware" aria-selected="false" class="test-tab">⚠ TEST</button>
   </div>
 
   <div class="dbody" id="tTune" role="tabpanel">
@@ -350,6 +360,21 @@ details.grp.has-changed > summary .dirty { display: inline-block; }
     </div>
   </div>
 
+  <div class="dbody" id="tHardware" role="tabpanel" hidden>
+    <div class="test-warning">
+      <h3>⚠ HARDWARE TEST · READ-ONLY</h3>
+      <div class="note">Car must be Manual, stopped, and off the web joystick. This does not change the current settings, save tuning, select a mode, or send motor commands.</div>
+      <button class="btn danger" id="hardwareStart" style="margin-top:10px">Run hardware test</button>
+      <div class="status" id="hardwareState" style="margin-top:8px">Not run</div>
+    </div>
+    <div id="hardwareResults" hidden style="margin-top:12px">
+      <div class="test-metrics" id="hardwareMetrics"></div>
+      <h3 style="margin-top:14px">Camera modes</h3>
+      <pre class="test-output" id="hardwareCamera"></pre>
+      <div class="note" id="hardwareDetails"></div>
+    </div>
+  </div>
+
   <div class="dbody" id="tLog" role="tabpanel" hidden>
     <div class="log" id="log"><div class="item"><span></span><span style="color:var(--muted)">Nothing yet.</span></div></div>
   </div>
@@ -405,8 +430,34 @@ $('menuBtn').onclick = () => openDrawer(!$('drawer').classList.contains('open'))
 $('closeBtn').onclick = $('scrim').onclick = () => openDrawer(false);
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tabs button').forEach(x => x.setAttribute('aria-selected', String(x === b)));
-  for (const id of ['tTune', 'tTuner', 'tLog', 'tGuide']) $(id).hidden = id !== b.dataset.tab;
+  for (const id of ['tTune', 'tTuner', 'tLog', 'tGuide', 'tHardware']) $(id).hidden = id !== b.dataset.tab;
 });
+$('testTab').onclick = () => { openDrawer(true); document.querySelector('.tabs button[data-tab="tHardware"]').click(); pollHardwareTest(); };
+
+/* ---------- read-only hardware test ---------- */
+let hardwareTestTimer = null;
+function renderHardwareTest(job) {
+  const state = job?.state || 'idle';
+  $('hardwareState').textContent = state === 'running' ? 'Running · keep the car stopped' : state === 'done' ? 'Complete' : state === 'failed' ? `Failed: ${job.error || ''}` : 'Not run';
+  $('hardwareStart').disabled = state === 'running';
+  $('hardwareResults').hidden = !job?.result;
+  const r = job?.result; if (!r) return;
+  const vals = [['Loop', r.loop_hz_median == null ? '—' : `${r.loop_hz_median} Hz`, 'control loop'],
+    ['Detector', r.detector_ms_median == null ? '—' : `${r.detector_ms_median} ms`, 'line processing'],
+    ['Overlay', r.overlay_ms_median == null ? '—' : `${r.overlay_ms_median} ms`, 'drawing'],
+    ['JPEG', r.jpeg_ms_median == null ? '—' : `${r.jpeg_ms_median} ms`, 'preview encoding'],
+    ['Tracking', r.tracking_pct == null ? '—' : `${r.tracking_pct}%`, 'line found'],
+    ['Battery', r.battery_available ? `${r.battery_v_min}–${r.battery_v_max} V` : 'Unavailable', 'INA219 cache']];
+  $('hardwareMetrics').innerHTML = vals.map(v => `<div class="test-metric"><b>${esc(v[1])}</b><span>${esc(v[0])} · ${esc(v[2])}</span></div>`).join('');
+  const cm = r.camera_modes || {};
+  $('hardwareCamera').textContent = cm.output || (cm.attempts || []).map(x => `${x.command}: ${x.output}`).join('\n') || 'No camera mode information returned.';
+  $('hardwareDetails').textContent = `${r.settings_unchanged ? 'Settings unchanged.' : 'WARNING: settings changed during the test.'} ${r.warning || ''} Samples: ${r.samples || 0}. Fresh frames: ${r.fresh_frames || 0}.`;
+}
+async function pollHardwareTest() {
+  try { renderHardwareTest(await api('/api/hardware-test')); } catch (e) { $('hardwareState').textContent = e.message; }
+  clearTimeout(hardwareTestTimer); hardwareTestTimer = setTimeout(pollHardwareTest, 1000);
+}
+$('hardwareStart').onclick = async () => { try { renderHardwareTest(await api('/api/hardware-test', {})); toast('Read-only hardware test started'); } catch (e) { toast('Test not started: ' + e.message); } };
 
 /* ---------- settings groups ---------- */
 const GROUPS = {
