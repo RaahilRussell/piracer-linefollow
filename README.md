@@ -14,9 +14,21 @@ An autonomous racing system for the Waveshare PiRacer Pro. It sees the orange ra
 - **Simulation:** useful for regression and controller comparisons, not a substitute for physical validation.
 - **Status:** active race project; camera, battery, grip, and steering calibration still affect results.
 
-## What Racing Line means
+## Controller progression and lap times
 
-This is not just a line follower. A basic line follower tries to keep a detected line at a fixed image position. Racing Line treats the visible tape as track geometry and chooses where the car should drive relative to it.
+The project evolved in three stages. The numbers below are deliberately labeled: the simulator was built for repeatable engineering checks, while physical laps are the result that matters.
+
+| Stage | Physical result | Supplementary simulator result | What changed |
+|---|---|---|---|
+| **PD baseline** | — | **8.40 s/lap** for the Nov 9, 9:31 pm setup; an earlier setup recorded 7.35 s/lap | Reacted to tape position at one image row using proportional and derivative correction. |
+| **Pure pursuit / fixed-offset Race** | **3.68 s/lap mean**, 0 line losses in the first corrected-camera Race run; a later fresh-battery Race run averaged **3.59 s/lap over 10 laps** | **3.68 s/lap nominal**, with all 21 tested variations passing in the documented comparison | Projected the visible boundary onto the ground and steered toward a point ahead on a ride line. |
+| **Racing Line + pure pursuit** | **About 3.05 s/lap mean** over an independent clean 9-lap timing window; an earlier 10-lap run averaged **3.57 s/lap** with one line loss | **3.50 s/lap** for the documented 1.00/0.90 profile; results depend strongly on the simulated speed and grip assumptions | Replaced the mostly fixed ride line with a path that prepares for the next bend, targets an apex, and exits smoothly. |
+
+These are not controlled laboratory comparisons: battery voltage, PWM, speed profile, camera calibration, track conditions, and timing method changed between runs. The progression is still useful because it shows the design direction: PD established a workable baseline, pure pursuit made steering geometric, and Racing Line made the car choose a faster path through the track.
+
+## What makes this a racer
+
+This is not just a line follower. A basic line follower tries to keep a detected line at a fixed image position. This racer treats the visible tape as track geometry and chooses where the car should drive relative to it.
 
 On a straight, the planned path stays farther from the inside tape so the car has room to set up the next bend. As a curve becomes visible, the planned path moves toward an apex and then exits back toward the straight. Pure pursuit aims at a point ahead on that moving path instead of reacting only to the tape's current position.
 
@@ -24,17 +36,22 @@ The dashboard draws the planned line in magenta. If the lane width or curve shap
 
 ![Annotated PiRacer camera frame with detected edges, target, and Racing Line](docs/media/camera-frame.jpg)
 
+The overlays are part of the control story, not post-processing: the green/amber traces show the detected track boundaries, the magenta trace is the planned Racing Line, and the cyan marker is the current pure-pursuit target.
+
 ![Reconstructed track](docs/media/track.svg)
+
+The reconstructed-track view makes the same idea easier to inspect from above: perception estimates the boundary, Racing Line chooses the route, and pure pursuit follows the route.
 
 ## See it drive
 
 ![Annotated PiRacer camera sequence with live steering overlays](docs/media/racing-preview.gif)
 
-The original recorded frame sequences are under [`tests/frames/`](tests/frames/). They support detector, replay, calibration, and controller work.
+This animated preview shows the live overlays moving with the car. The repository also keeps the original frame sequences under [`tests/frames/`](tests/frames/) so the detector and controller can be replayed rather than judged from a single screenshot.
 
-## Quickstart: complimentary simulator
 
-The simulator is the fastest way to inspect the dashboard and run repeatable checks without the car.
+## Quickstart: supplementary simulator
+
+The simulator is the fastest way to inspect the dashboard and run repeatable checks without the car. It is intentionally supplementary: we knew it was overbuilt for the time available, but we had less than a week, busy schedules, and barely any access to the physical car. It helps compare ideas; it does not replace a real lap.
 
 ```bash
 git clone https://github.com/RaahilRussell/piracer-linefollow.git
@@ -90,9 +107,11 @@ To install updated code during a planned stop:
 
 Dashboard **STOP** or Space returns to Manual with zero throttle. Gamepad A cycles modes, Y is the emergency stop, and X quits.
 
-## Why PID/PD came first
+## How the controller evolved
 
-The first controller was proportional-derivative control. It measured where the detected tape crossed a lookahead row and compared that position with a target.
+### 1. PD: a useful baseline, not the final racer
+
+People often say “PID,” but this project’s original controller was specifically **PD**: proportional plus derivative, with no integral term. It measured where the detected tape crossed one image row and compared that position with a target.
 
 ```text
 error       = measured_position - target_position
@@ -102,11 +121,11 @@ PD command  = KP * error + KD * derivative
 
 The proportional term turns toward the current error. The derivative term reacts to how quickly that error changes, helping reduce oscillation and overshoot. There is no integral term because accumulated error is not useful while track geometry, camera view, and car motion are changing rapidly.
 
-PD was a good first controller: simple, fast, and easy to tune from recorded frames. It could drive real laps. Its limitation was geometric: the same tape position in one image row can mean either a straight or a curve. PD knows the tape is displaced, but not the shape of the path ahead. In a tight bend it could turn too late and reach full lock while already running wide.
+PD was a good first controller: simple, fast, and easy to tune from recorded frames. It could drive real laps. Its limitation was geometric: the same tape position in one image row can mean either a straight or a curve. PD knows that the tape is displaced, but not the shape of the path ahead. In a tight bend it could turn too late and reach full lock while already running wide.
 
-## Why pure pursuit was better
+### 2. Pure pursuit: steering from the path ahead
 
-Pure pursuit uses the visible track shape to choose a goal point ahead of the car. The controller projects tape points onto the ground plane, shifts them to the car's ride line, and selects a lookahead goal:
+Pure pursuit was better for this car because it uses the visible track shape to choose a goal point ahead of the car. The controller projects tape points onto the ground plane, shifts them to the car’s ride line, and selects a lookahead goal:
 
 ```text
 curvature = 2 * goal_lateral / (goal_forward^2 + goal_lateral^2)
@@ -115,11 +134,11 @@ wheel_angle = atan(wheelbase * curvature)
 
 That gives the car a physical steering target instead of only a pixel error. It can prepare for a curve before the tape reaches the lookahead row and hold a circular path with much less oscillation.
 
-Pure pursuit depends on camera height, camera pitch, wheelbase, steering calibration, lookahead distance, and actuator delay. That is why this project keeps a small PD correction on top of pursuit and has a PD fallback when geometry is not trustworthy.
+Pure pursuit depends on camera height, camera pitch, wheelbase, steering calibration, lookahead distance, and actuator delay. That is why this project keeps a small PD correction on top of pursuit and has a PD fallback when geometry is not trustworthy. It also explains why a controller can look excellent in replay and still need physical tuning.
 
-## Why Racing Line was implemented
+### 3. Racing Line: choosing where to drive
 
-Pure pursuit originally followed a mostly fixed offset from the inside tape. That was more geometric than PD, but it still asked the car to use the same ride line through the straight and the curve.
+Pure pursuit originally followed a mostly fixed offset from the inside tape. That was more geometric than PD, but it still asked the car to use the same ride line through the straight and the curve. Racing Line was implemented because a fast car should not merely react to the nearest boundary; it should use the track visible ahead to choose a better path.
 
 Racing Line makes the ride line dynamic:
 
@@ -129,7 +148,7 @@ Racing Line makes the ride line dynamic:
 4. Exit back toward the straight without requesting an impossible turning radius.
 5. Use pure pursuit to aim at the planned path.
 
-The detector answers **where is the track?** Racing Line answers **where should the car be on the track?** Pure pursuit then turns that planned path into steering. This is the shift from line following to autonomous racing.
+The detector answers **where is the track?** Racing Line answers **where should the car be on the track?** Pure pursuit then turns that planned path into steering. That is the shift from line following to autonomous racing: perception finds the track, the Racing Line selects the route, and pure pursuit makes the car follow it.
 
 The older Race, Safe Race, Slow, and PD presets keep Racing Line disabled so they remain useful as comparison and rollback modes.
 
@@ -190,9 +209,9 @@ Important entry points:
 - [`sim/`](sim/) — complimentary closed-loop simulator
 - [`tools/race_eval.py`](tools/race_eval.py) — repeatable controller evaluation
 
-## Results and limitations
+## Results, evidence, and limitations
 
-The best documented physical Racing Line run averaged about 3.05 seconds per lap over an independent clean 9-lap timing window. An earlier 10-lap run recorded 3.36–3.85 seconds per lap, mean 3.57 seconds, with one line loss. A separate 12-lap slow validation recorded no line losses. These results belong to specific battery, PWM, speed, camera, and Racing Line settings; they are not universal performance guarantees.
+The best documented physical Racing Line run averaged about 3.05 seconds per lap over an independent clean 9-lap timing window. An earlier 10-lap run recorded 3.36–3.85 seconds per lap, mean 3.57 seconds, with one line loss. A separate 12-lap slow validation recorded no line losses. The earlier fixed-offset Race baseline recorded 14 laps at 3.49–3.84 seconds with no wide laps. These results belong to specific battery, PWM, speed, camera, and Racing Line settings; they are not universal performance guarantees.
 
 The simulator is intentionally secondary. We built more simulation than the schedule realistically allowed because the project had less than a week, busy schedules, and barely any car access. It made repeatable tests possible, but the simulated car is not the final judge. Real laps determine whether a setup is good.
 
