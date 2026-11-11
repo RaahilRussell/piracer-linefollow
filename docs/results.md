@@ -6,6 +6,7 @@ Results are only meaningful with their conditions. Battery, PWM, speed profile, 
 
 | Setup | Evidence |
 |---|---|
+| Racing Line promotion check | Independent clean 9-lap timing window, about 3.05 s/lap mean |
 | Racing Line, 407 PWM, 1.00 / 0.80 straight/curve | 10 laps, 3.36–3.85 s, mean 3.57 s, one line loss |
 | Racing Line slow validation | 12 laps, 4.46–5.01 s, zero line losses |
 | Earlier Race baseline | 14 laps, 3.49–3.84 s, no wide laps |

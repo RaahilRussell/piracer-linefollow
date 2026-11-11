@@ -10,7 +10,7 @@ An autonomous racing system for the Waveshare PiRacer Pro. It sees the orange ra
 
 - **Primary controller:** Racing Line + pure pursuit + light PD correction.
 - **Hardware:** Waveshare PiRacer Pro, Raspberry Pi, fisheye camera, orange-track race mat.
-- **Best documented real run:** 10 laps at 3.36–3.85 s, mean 3.57 s, with one line loss.
+- **Best documented real run:** about 3.05 s/lap over an independent clean 9-lap timing window.
 - **Simulation:** useful for regression and controller comparisons, not a substitute for physical validation.
 - **Status:** active race project; camera, battery, grip, and steering calibration still affect results.
 
@@ -192,7 +192,7 @@ Important entry points:
 
 ## Results and limitations
 
-The best documented physical Racing Line run was 10 laps at 3.36–3.85 seconds, mean 3.57 seconds, with one line loss. A separate 12-lap slow validation recorded no line losses. These results belong to specific battery, PWM, speed, camera, and Racing Line settings; they are not universal performance guarantees.
+The best documented physical Racing Line run averaged about 3.05 seconds per lap over an independent clean 9-lap timing window. An earlier 10-lap run recorded 3.36–3.85 seconds per lap, mean 3.57 seconds, with one line loss. A separate 12-lap slow validation recorded no line losses. These results belong to specific battery, PWM, speed, camera, and Racing Line settings; they are not universal performance guarantees.
 
 The simulator is intentionally secondary. We built more simulation than the schedule realistically allowed because the project had less than a week, busy schedules, and barely any car access. It made repeatable tests possible, but the simulated car is not the final judge. Real laps determine whether a setup is good.
 
