@@ -398,6 +398,11 @@ class LineFollowerPilot:
         kd = skd + (ckd - skd) * w
         return kp, kd, w, ("corner" if w >= 0.5 else "straight")
 
+    def _effective_steer_max_deg(self):
+        """Racing Line can tune steering response without affecting Race/PD presets."""
+        c = self.cfg
+        return max(1.0, c.racing_steer_max_deg if c.racing_line else c.steer_max_deg)
+
     def _pursuit(self, path):
         """Pure-pursuit steering command for this frame, or None when the edge can't be aimed at
         (then the frame falls back to plain PD). Never lets geometry trouble stop the car loop."""
@@ -409,6 +414,7 @@ class LineFollowerPilot:
             if self.ground is None:
                 self.ground = GroundModel(self.model)
             c = self.cfg
+            full_lock_deg = self._effective_steer_max_deg()
             # where the tracked edge runs beside the car when it rides at the target
             lateral = self.ground.lateral_at(c.lookahead_ratio, c.target_x_ratio + (lane_ratio if source == "right" else 0.0))
             if lateral is None:
@@ -421,10 +427,10 @@ class LineFollowerPilot:
             if c.pursuit_predict_s > 0:
                 # the frame shows where the car WAS: aim from where it will be when this command lands,
                 # assuming it holds its current speed and wheel angle (command + = right, wheel + = left)
-                wheel = -self.ctrl.angle * max(1.0, c.steer_max_deg)
+                wheel = -self.ctrl.angle * full_lock_deg
                 goal = predict_goal(goal, v, wheel, self.model.wheelbase_m, c.pursuit_predict_s)
             self.pursuit_goal = goal
-            return pursuit_steer(goal, self.model.wheelbase_m, max(1.0, c.steer_max_deg))
+            return pursuit_steer(goal, self.model.wheelbase_m, full_lock_deg)
         except Exception:
             return None
 
@@ -462,7 +468,7 @@ class LineFollowerPilot:
                 # Curve entry: the inner edge leaves the image before the lookahead point, so pursuit aims at
                 # the start of the curve and turns in late. The fitted curvature already shows the bend: pull
                 # the command toward the steering that follows it, only ever further INTO the curve.
-                want = steer_for_curvature(self.model, k, max(1.0, self.cfg.steer_max_deg))
+                want = steer_for_curvature(self.model, k, self._effective_steer_max_deg())
                 if (want < 0 and want < pursuit) or (want > 0 and want > pursuit):
                     pursuit = pursuit + turn_in * (want - pursuit)
             ff, ff_scale = pursuit, 1.0
@@ -475,7 +481,7 @@ class LineFollowerPilot:
                 if xe is not None:
                     target = xe
         elif k is not None and self.cfg.ff_gain > 0:
-            ff = steer_for_curvature(self.model, k, max(1.0, self.cfg.steer_max_deg))
+            ff = steer_for_curvature(self.model, k, self._effective_steer_max_deg())
             # aim PD at where the edge SHOULD appear in this corner, by the same fraction as the
             # feedforward (otherwise PD and feedforward both steer for the curve: too tight)
             if self.ground is None:
