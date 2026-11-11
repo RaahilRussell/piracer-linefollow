@@ -72,7 +72,7 @@ How deep it can cut (curve / straight distance, at 1.00 / 0.80):
 | Racing Line setting (curve / straight distance) | PWM, straight / curve | Laps | Notes |
 |---|---|---|---|
 | 3 cm / 12 cm | 407, 0.75 / 0.70 | 12 laps, 4.46–5.01 s | 0 line losses, racing line steering 100% of the time, 19% at full lock |
-| 3 cm / 12 cm | 407, 1.00 / 0.80 | 10 laps, 3.36–3.85 s, mean 3.57 | 1 line loss, 46% at full lock, 7% on the right-line backup. Jack's Race at the same speeds, Nov 10: 3.49–3.84 s |
+| 3 cm / 12 cm | 407, 1.00 / 0.80 | 10 laps, 3.36–3.85 s | 1 line loss, 46% at full lock, 7% on the right-line backup. Jack's Race at the same speeds, Nov 10: 3.49–3.84 s |
 | −3 cm / 18 cm | 420, 1.00 / 0.64 | 1 lap, 3.50 s | 2 line losses in that lap; stopped by the driver |
 
 The simulator's 9% gain did not show up: at Race speeds the steering is at full lock nearly half the time, so the car cannot hold the tighter line it is asked for.

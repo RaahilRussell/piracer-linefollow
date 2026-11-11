@@ -114,6 +114,9 @@ class LineDetectorPart:
         self._key = None
         self._t_new = None
         self._det = None
+        self._overlay = None
+        self._overlay_frame = None
+        self._overlay_age = 0.0
         self.proc_ms = 0.0
         self.overlay_ms = 0.0
         self._small = None
@@ -122,6 +125,7 @@ class LineDetectorPart:
     def attach(self, pilot: "LineFollowerPilot"):
         """Connect a pilot: it reads this detector's corner geometry and edge path each frame."""
         self.pilot = pilot
+        pilot.overlay_refresh = self.refresh_overlay
         pilot.bend_source = lambda: self.bend       # corner geometry for sections / feedforward / corner speed
         pilot.path_source = lambda: self.path       # edge ground points for pure pursuit
         pilot.conf_source = lambda: self._det.confidence if self._det is not None else None   # detection confidence
@@ -145,11 +149,28 @@ class LineDetectorPart:
             self._small = small
         det = self._det
         age = now - self._t_new
+        self._overlay_frame, self._overlay_age = img_rgb, age
         t_overlay = time.perf_counter()
         overlay = self.draw(img_rgb, det, age) if self.show_overlay else img_rgb
+        self._overlay = overlay
         self.overlay_ms = (time.perf_counter() - t_overlay) * 1000
         x = det.x_ratio if det.found else None
         return x, bool(det.found), age, overlay, self.motion, self.identity_sure()
+
+    def refresh_overlay(self):
+        """Redraw the current frame after the pilot computes its current command.
+
+        The detector runs before the pilot in the vehicle loop, so drawing only inside
+        ``run`` made the Racing Line overlay describe the previous pilot update. Keep
+        the returned image object stable and update it in place so later dashboard parts
+        see the current plan without changing the Donkeycar part wiring.
+        """
+        if not self.show_overlay or self._overlay is None or self._overlay_frame is None or self._det is None:
+            return
+        t_overlay = time.perf_counter()
+        current = self.draw(self._overlay_frame, self._det, self._overlay_age)
+        self._overlay[...] = current
+        self.overlay_ms = (time.perf_counter() - t_overlay) * 1000
 
     def _bend(self, det, w, h):
         """Curvature of the corner ahead from the tracked inside edge (left line, or the right line
@@ -335,6 +356,7 @@ class LineFollowerPilot:
         self._racing_force_t = None         # when the forced full-lock turn-in began (None = not forcing)
         self._racing_off = None             # smoothed ride distance
         self.conf_source = None     # callable -> detection confidence 0..1 (for the low-confidence slowdown)
+        self.overlay_refresh = None # callable -> redraw detector overlay after this pilot update
         self.conf_cap = None        # throttle cap from a low-confidence detection this frame, or None
         self.pursuit_goal = None    # pure-pursuit goal point this frame (x, y) m, or None
         self.curvature = None       # smoothed path curvature ahead, 1/m (+ left)
@@ -688,6 +710,8 @@ class LineFollowerPilot:
             self._last_drive_thr = throttle
         cmd.throttle = throttle
         self.last_cmd = cmd
+        if self.overlay_refresh is not None:
+            self.overlay_refresh()
         return float(cmd.angle), float(throttle)
 
     def active_cmd(self) -> Command | None:

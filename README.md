@@ -22,7 +22,7 @@ The project evolved in three stages. The numbers below are deliberately labeled:
 |---|---|---|---|
 | **PD baseline** | — | **8.40 s/lap** for the Nov 9, 9:31 pm setup; an earlier setup recorded 7.35 s/lap | Reacted to tape position at one image row using proportional and derivative correction. |
 | **Pure pursuit / fixed-offset Race** | **3.68 s/lap mean**, 0 line losses in the first corrected-camera Race run; a later fresh-battery Race run averaged **3.59 s/lap over 10 laps** | **3.68 s/lap nominal**, with all 21 tested variations passing in the documented comparison | Projected the visible boundary onto the ground and steered toward a point ahead on a ride line. |
-| **Racing Line + pure pursuit** | **About 3.05 s/lap mean** over an independent clean 9-lap timing window; an earlier 10-lap run averaged **3.57 s/lap** with one line loss | **3.50 s/lap** for the documented 1.00/0.90 profile; results depend strongly on the simulated speed and grip assumptions | Replaced the mostly fixed ride line with a path that prepares for the next bend, targets an apex, and exits smoothly. |
+| **Racing Line + pure pursuit** | **About 3.05 s/lap mean** over an independent clean 9-lap timing window | **3.50 s/lap** for the documented 1.00/0.90 profile; results depend strongly on the simulated speed and grip assumptions | Replaced the mostly fixed ride line with a path that prepares for the next bend, targets an apex, and exits smoothly. |
 
 These are not controlled laboratory comparisons: battery voltage, PWM, speed profile, camera calibration, track conditions, and timing method changed between runs. The progression is still useful because it shows the design direction: PD established a workable baseline, pure pursuit made steering geometric, and Racing Line made the car choose a faster path through the track.
 
@@ -211,7 +211,7 @@ Important entry points:
 
 ## Results, evidence, and limitations
 
-The best documented physical Racing Line run averaged about 3.05 seconds per lap over an independent clean 9-lap timing window. An earlier 10-lap run recorded 3.36–3.85 seconds per lap, mean 3.57 seconds, with one line loss. A separate 12-lap slow validation recorded no line losses. The earlier fixed-offset Race baseline recorded 14 laps at 3.49–3.84 seconds with no wide laps. These results belong to specific battery, PWM, speed, camera, and Racing Line settings; they are not universal performance guarantees.
+The best documented physical Racing Line run averaged about 3.05 seconds per lap over an independent clean 9-lap timing window. A separate 12-lap slow validation recorded no line losses. The earlier fixed-offset Race baseline recorded 14 laps at 3.49–3.84 seconds with no wide laps. These results belong to specific battery, PWM, speed, camera, and Racing Line settings; they are not universal performance guarantees.
 
 The simulator is intentionally secondary. We built more simulation than the schedule realistically allowed because the project had less than a week, busy schedules, and barely any car access. It made repeatable tests possible, but the simulated car is not the final judge. Real laps determine whether a setup is good.
 
