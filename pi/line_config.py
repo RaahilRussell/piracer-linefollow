@@ -56,6 +56,10 @@ PURSUIT_LD_GAIN_S = 0.30   # extra lookahead per m/s (speed from SPEED_TABLE bel
 PURSUIT_PD = 0.10          # Nov 10: 0.10-0.15 ok, 0.05 and 0.25 fail. Share of KP/KD (3.5/0.4 -> 0.35/0.04) added on top of pure pursuit as image-space feedback.
                            # Pure pursuit aims through the camera ground model (pitch/height/FOV assumed); this PD term
                            # closes whatever offset a wrong model leaves.
+CORNER_CUT_M = 0.18        # curve inside line: slide the ride line this far toward the inside as a curve appears (m). At target
+                           # 0.35 the car rides 0.14 m right of the left line, so 0.18 crosses it. Sim --pairs: 0 -> 4.60 s, 0.10 -> 4.31 s,
+                           # 0.18 -> 4.12 s (over the inside line 43% of the time, never wide, line loss 0.2%), 0.25 -> 4.26 s.
+                           # REAL Nov 11 (7.9 V): with 0.18 at 0.95/0.79/0.75, 19 laps 3.26-3.48 s, 0 line losses (0 m: 3.61-3.88 s, blips).
 PURSUIT_TURN_IN = 0.0      # curve entry: pull steering toward the visible curve's own steering (0 = off). Sim 0.5 passes
                            # (3.51 vs 3.54 s), 1.0 cuts deep inside. REAL Nov 10 night at 0.5: no gain (mean 3.61 vs 3.64 s, 4 blips vs 0):
                            # the late turn-in comes from a weave on the straight, before the curve is visible.
@@ -136,14 +140,18 @@ SPEED_CORNER = 0.70
 #   On a tired battery the same throttle is slower: if laps get slow, raise the curve throttle a step at a time.
 # The dashboard's "Race" preset (it also sets the forward PWM; other presets use 407).
 RACE_FORWARD_PWM = 407
-RACE_SPEED_STRAIGHT = 1.00
-RACE_SPEED_TRANSITION = 0.84
-RACE_SPEED_CORNER = 0.80
+# Nov 11 with CORNER_CUT_M 0.18 (inside line), battery 7.9 V: 0.95 / 0.79 / 0.75 -> 11 laps 3.26-3.38 s, then 8 more 3.33-3.48 s,
+#   0 line losses. 1.00 / 0.81 / 0.77: 8 laps 3.11-3.23 s, then 3.49-4.26 s with line losses. 1.00 / 0.84 / 0.80: 3.01-3.12 s but
+#   2 of 9 laps went wrong (5.2 s). Faster setups are for a tired battery; check a few laps first.
+RACE_SPEED_STRAIGHT = 0.95
+RACE_SPEED_TRANSITION = 0.79
+RACE_SPEED_CORNER = 0.75
 # SAFE RACE: 0.92 / 0.80 / 0.76 at PWM 407. REAL Nov 10 night (fresh battery, same steering): 7 laps 3.82-4.06 s, no wide laps.
 # Don't go lower in the curves: 0.64 (PWM 394) is near where the motor barely moves, and laps took 5-6 s.
+#   Nov 11: with the inside line, Race itself is the steady setup; Safe is one more step down (not driven with the inside line).
 SAFE_SPEED_STRAIGHT = 0.92
-SAFE_SPEED_TRANSITION = 0.80
-SAFE_SPEED_CORNER = 0.76
+SAFE_SPEED_TRANSITION = 0.76
+SAFE_SPEED_CORNER = 0.72
 SAFE_FORWARD_PWM = 407     # the speeds above were driven at PWM 407
 TUNE_RACE_FIRST = False    # False: "Start lap tuner" climbs from the speeds on the car. True: jump to the race values first.
 SPEED_RAMP_DOWN = 2.0

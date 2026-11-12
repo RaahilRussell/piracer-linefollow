@@ -8,6 +8,25 @@ Conventions:
 
 ---
 
+## Nov 11: inside line through the curves, Race 3.26-3.48 s (real)
+
+**New setting, Curve inside line (`CORNER_CUT_M`, default 0.18 m):** as a curve comes into view, pure pursuit's ride line slides toward the inside, scaled by curve weight. The car normally rides 0.14 m right of the left line (target 0.35), so 0.18 takes it across that line through each left curve. The car turns in sooner and the path is shorter. The PD correction fades out as the inside line takes over, so it doesn't pull the car back out.
+
+**Race preset is now 0.95 / 0.79 / 0.75 at PWM 407** (was 1.00 / 0.84 / 0.80). Safe race is now 0.92 / 0.76 / 0.72, not yet driven with the inside line.
+
+**Real results** (battery 7.9 V):
+
+| Setup | Laps | Line losses |
+|---|---|---|
+| Inside line 0.18, 0.95 / 0.79 / 0.75 | 19 laps, 3.26–3.48 s | 0 |
+| No inside line, same speeds | 3.61–3.78 s | brief losses on most laps |
+| Inside line, 1.00 / 0.81 / 0.77 | 8 laps 3.11–3.23 s, then 3.49–4.26 s | yes, in the later laps |
+| Inside line, 1.00 / 0.84 / 0.80 | 3.01–3.12 s, but 2 of 9 laps at 5.2 s | yes |
+
+**sim** (`race_eval --pairs`): inside line 0 → 4.60 s, 0.10 → 4.31 s, 0.18 → 4.12 s (over the inside line 43% of the time, never wide, line loss 0.2%), 0.25 → 4.26 s. race_eval reports 0.18 as a "fail" because it counts crossing the inside line as a fault; here that crossing is intended. Two simulator tests that check in-lane physics (curvature measurement, crawl laps) now run with the inside line off.
+
+---
+
 ## Nov 10 night: fresh-battery Race values, faster steering, lap timer and deploy fixes
 
 A fully charged battery makes every PWM faster. The old Race (PWM 420, 1.00/0.69/0.64) lost the line in the first curve. The afternoon video setup (PWM 407, 1.00/0.93/0.86, restored in 57b6083) lost the line and ran wide. All results below are **real** unless marked sim. Lap times are counted from curve entries, because the lap timer was dropping laps (fixed below).

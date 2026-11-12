@@ -681,6 +681,7 @@ class PresetsAndPage(unittest.TestCase):
         hub, lc, webui = self.hub()
         est = next(p for p in hub.presets() if p["id"] == "race")["estimate"]
         self.assertTrue(est["estimate"])
-        # Estimate at PWM 407, 1.00 / 0.80 from the assumed (tired-battery) speed table. Real laps on a fresh battery: 3.52-3.84 s.
-        self.assertAlmostEqual(est["lap_s"], 4.8, delta=0.25)
+        # Estimate at PWM 407, 0.95 / 0.75 from the assumed (tired-battery) speed table, which also ignores the shorter
+        # inside line. Real laps Nov 11 (7.9 V, inside line 0.18 m): 3.26-3.48 s.
+        self.assertAlmostEqual(est["lap_s"], 5.6, delta=0.25)
         self.assertAlmostEqual(est["total_s"], 10 * est["lap_s"], delta=0.06)

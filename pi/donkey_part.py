@@ -398,7 +398,7 @@ class LineFollowerPilot:
         kd = skd + (ckd - skd) * w
         return kp, kd, w, ("corner" if w >= 0.5 else "straight")
 
-    def _pursuit(self, path):
+    def _pursuit(self, path, k=None):
         """Pure-pursuit steering command for this frame, or None when the edge can't be aimed at
         (then the frame falls back to plain PD). Never lets geometry trouble stop the car loop."""
         self.pursuit_goal = None
@@ -413,6 +413,12 @@ class LineFollowerPilot:
             lateral = self.ground.lateral_at(c.lookahead_ratio, c.target_x_ratio + (lane_ratio if source == "right" else 0.0))
             if lateral is None:
                 return None
+            cut = getattr(c, "corner_cut_m", 0.0) or 0.0
+            if cut > 0 and k is not None:
+                # Inside line: as a curve comes into view, slide the ride line toward the inside of the curve
+                # (left curve -> toward / across the left line). Starts the turn sooner and shortens the path.
+                w = self._section_gains(k)[2]
+                lateral -= cut * w * (1.0 if k > 0 else -1.0)
             v = speed_of_cmd(self.model, self._last_drive_thr)
             ld = max(0.15, c.pursuit_ld_m + c.pursuit_ld_gain_s * v)
             goal = pursuit_goal(ground, lateral, ld)
@@ -452,7 +458,7 @@ class LineFollowerPilot:
         ctl_mode = DRIVE if mode == "local" else STEER_ONLY
         k = self._curvature(bend) if found else None
         ff, target, ff_scale, gain_scale = 0.0, None, None, 1.0
-        pursuit = self._pursuit(path) if (found and self.cfg.pure_pursuit) else None
+        pursuit = self._pursuit(path, k) if (found and self.cfg.pure_pursuit) else None
         if not self.cfg.pure_pursuit:
             self.pursuit_goal = None
         if pursuit is not None:
@@ -467,6 +473,8 @@ class LineFollowerPilot:
                     pursuit = pursuit + turn_in * (want - pursuit)
             ff, ff_scale = pursuit, 1.0
             gain_scale = min(1.0, max(0.0, self.cfg.pursuit_pd))
+            if k is not None and (getattr(self.cfg, "corner_cut_m", 0.0) or 0.0) > 0:
+                gain_scale *= 1.0 - self._section_gains(k)[2]   # cutting the corner on purpose: no pull back out
             if k is not None and gain_scale > 0:
                 # In a curve the edge sits left of the target even when the car is exactly on its
                 # line. Aim the PD correction at where the edge SHOULD be, or it adds a second

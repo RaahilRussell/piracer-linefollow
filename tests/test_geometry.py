@@ -192,7 +192,7 @@ class TestControllerAndPilot(unittest.TestCase):
         for ti in (0.0, 0.5):
             cfg.pursuit_turn_in = ti
             pilot = LineFollowerPilot(cfg, clock=lambda: 0.0)
-            pilot._pursuit = lambda path: 0.2                       # pursuit says: a little right
+            pilot._pursuit = lambda path, k=None: 0.2                       # pursuit says: a little right
             pilot.run("local_angle", cfg.target_x_ratio, True, 0.0, bend=left)
             out[ti] = pilot.last_cmd.ff
         self.assertAlmostEqual(out[0.0], 0.2)
@@ -200,9 +200,22 @@ class TestControllerAndPilot(unittest.TestCase):
         # already turning harder than the curve needs: left alone (never less turn)
         cfg.pursuit_turn_in = 1.0
         pilot = LineFollowerPilot(cfg, clock=lambda: 0.0)
-        pilot._pursuit = lambda path: -1.0
+        pilot._pursuit = lambda path, k=None: -1.0
         pilot.run("local_angle", cfg.target_x_ratio, True, 0.0, bend=left)
         self.assertAlmostEqual(pilot.last_cmd.ff, -1.0)
+
+    def test_corner_cut_moves_the_ride_line_inside_only_in_curves(self):
+        cfg, _ = load_line_config(line_config)
+        cfg.steering_smoothing, cfg.steering_rate_limit, cfg.pursuit_pd, cfg.pursuit_predict_s = 0.0, 100.0, 0.0, 0.0
+        straight_edge = np.array([[x, 0.14] for x in np.linspace(0.2, 1.2, 30)])   # left line 14 cm to the left
+        out = {}
+        for cut in (0.0, 0.18):
+            cfg.corner_cut_m = cut
+            for k in (0.0, 1.5):
+                p = LineFollowerPilot(cfg, clock=lambda: 0.0)
+                out[(cut, k)] = p._pursuit((straight_edge, "left", 0.29), k)
+        self.assertAlmostEqual(out[(0.18, 0.0)], out[(0.0, 0.0)])   # straight: unchanged
+        self.assertLess(out[(0.18, 1.5)], out[(0.0, 1.5)] - 0.1)    # left curve: steers further left (inside)
 
     def test_speed_plan_uses_curvature_transition_and_slews(self):
         from donkey_part import SpeedPlan
@@ -361,7 +374,7 @@ class TestInSimulator(unittest.TestCase):
         from sim.params import Profile
         from sim.world import World
         prof, clk = Profile.load(), _Clock()
-        ctrl = PilotController("t", {"kp": 3.0, "kd": 1.0, "ff_gain": 0.6}, speed=0.7, clock=clk)
+        ctrl = PilotController("t", {"kp": 3.0, "kd": 1.0, "ff_gain": 0.6, "corner_cut_m": 0.0}, speed=0.7, clock=clk)  # stay in lane: measures curvature
         w = World(prof, seed=3, target_ratio=ctrl.cfg.target_x_ratio, row_ratio=ctrl.cfg.lookahead_ratio)
         ks = []
         while w.t < 20:
